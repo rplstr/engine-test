@@ -55,6 +55,7 @@ fn compileModules(b: *std.Build, mods: []const ManifestModule, target: std.Build
         lib.linkLibC();
 
         const inst = b.addInstallArtifact(lib, .{});
+        b.default_step.dependOn(&inst.step);
 
         const step_name = m.name;
         const step_desc = std.fmt.allocPrint(b.allocator, "Build {s} module only", .{m.name}) catch unreachable;
