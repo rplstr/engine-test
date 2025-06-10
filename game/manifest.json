@@ -9,8 +9,5 @@
     "abi": 1,
     "deps": [
         "engine"
-    ],
-    "symbols": [
-        "game_init"
     ]
 }

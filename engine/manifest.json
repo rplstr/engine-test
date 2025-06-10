@@ -7,9 +7,5 @@
         "patch": 0
     },
     "abi": 1,
-    "deps": [],
-    "symbols": [
-        "engine_init",
-        "print"
-    ]
+    "deps": []
 }
