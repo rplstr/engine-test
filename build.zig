@@ -35,7 +35,7 @@ fn compileModules(b: *std.Build, mods: []const ManifestModule, target: std.Build
     map.ensureTotalCapacity(@intCast(mods.len)) catch unreachable;
 
     for (mods) |m| {
-        const src = std.fmt.allocPrint(b.allocator, "{s}/{s}.zig", .{ m.name, m.name }) catch unreachable;
+        const src = std.fs.path.join(b.allocator, &.{ m.name, m.root_source_file }) catch unreachable;
 
         const mod = b.addModule(m.name, .{
             .root_source_file = b.path(src),
@@ -125,7 +125,7 @@ fn linkSystemLibraries(m: ManifestModule, lib: *std.Build.Step.Compile, target: 
 /// Module descriptor parsed from `manifest.json` found in each module directory.
 const ManifestModule = struct {
     name: []const u8,
-    root_source_file: []const u8,
+    root_source_file: []const u8 = "",
     version: std.SemanticVersion = .{ .major = 1, .minor = 0, .patch = 0 },
     deps: []const []const u8 = &.{},
     syslibs: SysLibs = .{},
