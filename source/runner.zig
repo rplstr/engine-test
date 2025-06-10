@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log;
 const builtin = @import("builtin");
 
 pub fn main() !void {
@@ -13,17 +14,23 @@ pub fn main() !void {
     }
 
     const argv = try std.process.argsAlloc(alloc);
+
     defer std.process.argsFree(alloc, argv);
     const cli = if (argv.len > 1) argv[1] else "";
+
     const manifest = readModuleList(alloc) catch |e| {
-        std.log.err("failed to read modules.json: {any}", .{e});
+        log.err("failed to read modules.json: {any}", .{e});
         return e;
     };
+    log.info("manifest modules: {any}", .{manifest});
 
     try loadModule(&alloc, &mods, "engine");
 
     if (cli.len != 0) {
-        if (!hasLoaded(&mods, cli)) try loadModule(&alloc, &mods, cli);
+        if (!hasLoaded(&mods, cli)) {
+            log.info("loading requested module: {s}", .{cli});
+            try loadModule(&alloc, &mods, cli);
+        }
 
         for (manifest) |m| alloc.free(m);
         alloc.free(manifest);
@@ -33,8 +40,9 @@ pub fn main() !void {
                 alloc.free(m);
                 continue;
             }
-
+            log.info("loading manifest module: {s}", .{m});
             try loadModule(&alloc, &mods, m);
+            log.info("module '{s}' loaded from manifest", .{m});
             alloc.free(m);
         }
 
@@ -133,8 +141,9 @@ fn readModuleList(alloc: std.mem.Allocator) ![]const []const u8 {
 /// Helper that opens `path` as a dynamic library and logs an error
 /// if the operation fails. The caller is responsible for closing the handle.
 fn openDynLib(path: []const u8) !std.DynLib {
+    log.debug("opening shared library from {s}", .{path});
     return std.DynLib.open(path) catch |e| {
-        std.log.err("failed to open shared library '{s}': {any}", .{ path, e });
+        log.err("failed to open shared library '{s}': {any}", .{ path, e });
         return e;
     };
 }
@@ -142,39 +151,51 @@ fn openDynLib(path: []const u8) !std.DynLib {
 /// Dynamically load the module `name`, execute its initializer, and push an
 /// entry to `list`. Any error closes the library.
 fn loadModule(alloc: *std.mem.Allocator, list: *std.ArrayList(Module), name: []const u8) !void {
+    log.debug("resolving library path for module '{s}'", .{name});
     var lib = blk: {
         const path = try libPath(alloc.*, name);
         defer alloc.free(path);
         break :blk try openDynLib(path);
     };
+    log.info("library loaded for module '{s}'", .{name});
 
     const init = lookupSym(init_fn, &lib, alloc.*, "{s}_init", name) catch |e| {
-        std.log.err("missing init symbol in module '{s}'", .{name});
+        log.err("missing init symbol in module '{s}'", .{name});
         lib.close();
         return e;
     };
-    const deinit = lookupSym(deinit_fn, &lib, alloc.*, "{s}_deinit", name) catch |e| {
-        std.log.err("missing deinit symbol in module '{s}'", .{name});
-        lib.close();
-        return e;
-    };
-
+    log.debug("found init symbol for '{s}'", .{name});
     init(@constCast(alloc));
+    log.info("module '{s}' initialized", .{name});
+
+    const deinit = lookupSym(deinit_fn, &lib, alloc.*, "{s}_deinit", name) catch |e| {
+        log.err("missing deinit symbol in module '{s}'", .{name});
+        lib.close();
+        return e;
+    };
+    log.debug("found deinit symbol for '{s}'", .{name});
+
     const stored_name = try alloc.*.dupe(u8, name);
     try list.append(.{ .lib = lib, .deinit = deinit, .name = stored_name });
+    log.info("done", .{});
 }
 
 /// De-initialize and close all modules in reverse order of loading.
 pub fn unloadAll(mods: *std.ArrayList(Module)) void {
     const alloc = mods.allocator;
-    var i: usize = mods.items.len;
+    const total = mods.items.len;
+    log.info("unloading {d} total modules", .{total});
+    var i: usize = total;
     while (i > 0) {
         i -= 1;
         var m = mods.items[i];
+        log.info("deinitialsing module '{s}'", .{m.name});
         m.deinit();
+        log.info("closing library for module '{s}'", .{m.name});
         m.lib.close();
         alloc.free(m.name);
     }
+    log.info("done", .{});
 }
 
 /// Check if a module with the given name has been loaded.
