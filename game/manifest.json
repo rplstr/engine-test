@@ -1,11 +1,16 @@
 {
     "name": "game",
+    "root_source_file": "game.zig",
     "version": {
         "major": 1,
         "minor": 0,
         "patch": 0
     },
+    "abi": 1,
     "deps": [
         "engine"
+    ],
+    "symbols": [
+        "game_init"
     ]
 }

@@ -1,8 +1,15 @@
 {
     "name": "engine",
+    "root_source_file": "engine.zig",
     "version": {
         "major": 1,
         "minor": 0,
         "patch": 0
-    }
+    },
+    "abi": 1,
+    "deps": [],
+    "symbols": [
+        "engine_init",
+        "print"
+    ]
 }
