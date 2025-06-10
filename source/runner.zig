@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    var alloc = gpa.allocator(); // stable storage for allocator struct
+    var alloc = gpa.allocator();
 
     var mods = std.ArrayList(Module).init(alloc);
     defer {
