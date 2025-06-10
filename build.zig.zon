@@ -1,0 +1,16 @@
+.{
+    .name = .eng,
+    .version = "1.0.0",
+
+    .fingerprint = 0x8c736521055d54f8,  // Do not change.
+
+    .minimum_zig_version = "0.14.0",
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "source",
+        "game",
+        "engine"
+    },
+}
