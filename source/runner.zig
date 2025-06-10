@@ -1,68 +1,187 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const init_fn = *const fn () void;
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    var alloc = gpa.allocator(); // stable storage for allocator struct
 
+    var mods = std.ArrayList(Module).init(alloc);
+    defer {
+        unloadAll(&mods);
+        mods.deinit();
+    }
+
+    const argv = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, argv);
+    const cli = if (argv.len > 1) argv[1] else "";
+    const manifest = readModuleList(alloc) catch |e| {
+        std.log.err("failed to read modules.json: {any}", .{e});
+        return e;
+    };
+
+    try loadModule(&alloc, &mods, "engine");
+
+    if (cli.len != 0) {
+        if (!hasLoaded(&mods, cli)) try loadModule(&alloc, &mods, cli);
+
+        for (manifest) |m| alloc.free(m);
+        alloc.free(manifest);
+    } else {
+        for (manifest) |m| {
+            if (hasLoaded(&mods, m)) {
+                alloc.free(m);
+                continue;
+            }
+
+            try loadModule(&alloc, &mods, m);
+            alloc.free(m);
+        }
+
+        alloc.free(manifest);
+    }
+}
+
+/// Symbol type for a module initializer function.
+/// The runner passes its allocator to this function.
+/// Must be exported as `<module>_init` from each dynamic library.
+const init_fn = *const fn (*std.mem.Allocator) callconv(.C) void;
+
+/// Symbol type for a module clean-up function.
+/// Must be exported as `<module>_deinit` from each dynamic library.
+const deinit_fn = *const fn () callconv(.C) void;
+
+/// Runtime descriptor for a single loaded module.
+/// Stores the dynamic library handle, clean-up symbol, and a copy of
+/// its name so we can avoid duplicate loads and free memory reliably.
+pub const Module = struct {
+    lib: std.DynLib,
+    deinit: deinit_fn,
+    name: []const u8,
+};
+
+comptime {
+    if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) {
+        @compileError("dynamic loading is unavailable for this target");
+    }
+}
+
+/// Compose the platform-specific file name of the shared library for `mod`.
+/// Example on Linux: `libengine.so`, on Windows: `engine.dll`.
+/// The returned slice is heap-allocated and must be freed by the caller.
 fn sharedName(alloc: std.mem.Allocator, mod: []const u8) ![]u8 {
     const ext = switch (builtin.os.tag) {
         .windows => ".dll",
         .macos => ".dylib",
         else => ".so",
     };
-    const pref = switch (builtin.os.tag) {
-        .windows => "",
-        else => "lib",
-    };
+    const pref = if (builtin.os.tag == .windows) "" else "lib";
     return std.fmt.allocPrint(alloc, "{s}{s}{s}", .{ pref, mod, ext });
 }
 
+/// Join the executable directory with the library file name to obtain
+/// an absolute path to the module shared object.
 fn libPath(alloc: std.mem.Allocator, mod: []const u8) ![]u8 {
     const dir = try std.fs.selfExeDirPathAlloc(alloc);
     defer alloc.free(dir);
-
     const name = try sharedName(alloc, mod);
     defer alloc.free(name);
-
     return std.fs.path.join(alloc, &.{ dir, name });
 }
 
-fn loadModule(
-    alloc: std.mem.Allocator,
-    mods: *std.ArrayList(std.DynLib),
-    name: []const u8,
-) !void {
-    const path = try libPath(alloc, name);
-    defer alloc.free(path);
-
-    var lib = try std.DynLib.open(path);
-    try mods.append(lib);
-
-    const sym = try std.fmt.allocPrintZ(alloc, "{s}_init", .{name});
-    defer alloc.free(sym);
-
-    const init = lib.lookup(init_fn, sym).?;
-    init();
+/// Allocate a zero-terminated string using `std.fmt.allocPrintZ`.
+fn allocZ(alloc: std.mem.Allocator, comptime fmt: []const u8, mod: []const u8) ![:0]u8 {
+    return std.fmt.allocPrintZ(alloc, fmt, .{mod});
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+/// Look up a symbol named using `fmt` inside `lib` and
+/// return it as the requested type `T`.
+fn lookupSym(comptime T: type, lib: *std.DynLib, alloc: std.mem.Allocator, comptime fmt: []const u8, mod: []const u8) !T {
+    const sym = try allocZ(alloc, fmt, mod);
+    defer alloc.free(sym);
+    return lib.lookup(T, sym) orelse error.MissingSymbol;
+}
 
-    var libs = std.ArrayList(std.DynLib).init(alloc);
-    defer {
-        for (libs.items) |*l| l.close();
-        libs.deinit();
+/// Read `modules.json` from the working directory and return the list of
+/// additional modules to load (excluding "engine"). When the
+/// file is absent return an empty slice so fallback can be used.
+fn readModuleList(alloc: std.mem.Allocator) ![]const []const u8 {
+    // Read modules.json if present. Duplicate each entry so we can
+    // safely free the temporary JSON structures and buffer.
+    const path = "modules.json";
+
+    var file = std.fs.cwd().openFile(path, .{}) catch |e| switch (e) {
+        error.FileNotFound => return alloc.alloc([]const u8, 0),
+        else => return e,
+    };
+    defer file.close();
+
+    // 1 MiB cap keeps allocation in check while remaining generous.
+    const buf = try file.readToEndAlloc(alloc, 1 << 20);
+    defer alloc.free(buf);
+
+    const Parsed = struct { modules: []const []const u8 = &.{} };
+    const parsed = try std.json.parseFromSlice(Parsed, alloc, buf, .{});
+    defer parsed.deinit();
+
+    const src = parsed.value.modules;
+    var out = try alloc.alloc([]const u8, src.len);
+    var i: usize = 0;
+    while (i < src.len) : (i += 1) {
+        out[i] = try alloc.dupe(u8, src[i]);
     }
+    return out;
+}
 
-    const argv = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, argv);
+/// Helper that opens `path` as a dynamic library and logs an error
+/// if the operation fails. The caller is responsible for closing the handle.
+fn openDynLib(path: []const u8) !std.DynLib {
+    return std.DynLib.open(path) catch |e| {
+        std.log.err("failed to open shared library '{s}': {any}", .{ path, e });
+        return e;
+    };
+}
 
-    const want = if (argv.len > 1) argv[1] else "engine";
+/// Dynamically load the module `name`, execute its initializer, and push an
+/// entry to `list`. Any error closes the library.
+fn loadModule(alloc: *std.mem.Allocator, list: *std.ArrayList(Module), name: []const u8) !void {
+    var lib = blk: {
+        const path = try libPath(alloc.*, name);
+        defer alloc.free(path);
+        break :blk try openDynLib(path);
+    };
 
-    try loadModule(alloc, &libs, "engine");
+    const init = lookupSym(init_fn, &lib, alloc.*, "{s}_init", name) catch |e| {
+        std.log.err("missing init symbol in module '{s}'", .{name});
+        lib.close();
+        return e;
+    };
+    const deinit = lookupSym(deinit_fn, &lib, alloc.*, "{s}_deinit", name) catch |e| {
+        std.log.err("missing deinit symbol in module '{s}'", .{name});
+        lib.close();
+        return e;
+    };
 
-    if (std.mem.eql(u8, want, "engine") == false) {
-        try loadModule(alloc, &libs, want);
+    init(@constCast(alloc));
+    const stored_name = try alloc.*.dupe(u8, name);
+    try list.append(.{ .lib = lib, .deinit = deinit, .name = stored_name });
+}
+
+/// De-initialize and close all modules in reverse order of loading.
+pub fn unloadAll(mods: *std.ArrayList(Module)) void {
+    const alloc = mods.allocator;
+    var i: usize = mods.items.len;
+    while (i > 0) {
+        i -= 1;
+        var m = mods.items[i];
+        m.deinit();
+        m.lib.close();
+        alloc.free(m.name);
     }
+}
+
+/// Check if a module with the given name has been loaded.
+fn hasLoaded(list: *const std.ArrayList(Module), name: []const u8) bool {
+    for (list.items) |m| if (std.mem.eql(u8, m.name, name)) return true;
+    return false;
 }

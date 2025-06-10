@@ -1,7 +1,12 @@
 const std = @import("std");
 const engine = @import("engine");
 
-pub export fn game_module_init() void {
+export fn game_init(alloc: *std.mem.Allocator) callconv(.C) void {
+    _ = alloc;
     std.debug.print("(game) module_init\n", .{});
     engine.print();
+}
+
+export fn game_deinit() callconv(.C) void {
+    std.debug.print("(game) module_deinit\n", .{});
 }

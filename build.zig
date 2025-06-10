@@ -6,32 +6,44 @@ pub fn build(b: *std.Build) void {
 
     const modules = discoverModules(b.allocator) catch |e| std.debug.panic("module discovery failed: {}", .{e});
 
+    const exe = addRunner(b, target, optimize);
+    b.installArtifact(exe);
+    const map = compileModules(b, modules, target, optimize);
+    resolveDeps(modules, map);
+
+    b.default_step.dependOn(&exe.step);
+}
+
+/// Add the `runner` executable build step. Returns the compile step so
+/// the caller can attach dependencies.
+fn addRunner(b: *std.Build, target: std.Build.ResolvedTarget, opt: std.builtin.OptimizeMode) *std.Build.Step.Compile {
     const exe = b.addExecutable(.{
         .name = "runner",
         .root_source_file = b.path("source/runner.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = opt,
     });
+
     exe.linkLibC();
-    b.installArtifact(exe);
+    return exe;
+}
 
+/// Compile all discovered modules as dynamic libraries, install them, and
+/// return a mapping from module names to their compile steps.
+fn compileModules(b: *std.Build, mods: []const ManifestModule, target: std.Build.ResolvedTarget, opt: std.builtin.OptimizeMode) std.StringHashMap(*std.Build.Step.Compile) {
     var map = std.StringHashMap(*std.Build.Step.Compile).init(b.allocator);
-    map.ensureTotalCapacity(modules.len) catch unreachable;
+    map.ensureTotalCapacity(mods.len) catch unreachable;
 
-    // Compile libraries.
-    for (modules) |m| {
-        var src: []u8 = undefined;
-
-        if (m.root_source_file.len != 0) {
-            src = std.fs.path.join(b.allocator, &.{ m.name, m.root_source_file }) catch unreachable;
-        } else {
-            src = std.fmt.allocPrint(b.allocator, "{s}/{s}.zig", .{ m.name, m.name }) catch unreachable;
-        }
+    for (mods) |m| {
+        const src = if (m.root_source_file.len != 0)
+            std.fs.path.join(b.allocator, &.{ m.name, m.root_source_file }) catch unreachable
+        else
+            std.fmt.allocPrint(b.allocator, "{s}/{s}.zig", .{ m.name, m.name }) catch unreachable;
 
         const mod = b.addModule(m.name, .{
             .root_source_file = b.path(src),
             .target = target,
-            .optimize = optimize,
+            .optimize = opt,
         });
 
         const lib = b.addLibrary(.{
@@ -40,23 +52,32 @@ pub fn build(b: *std.Build) void {
             .linkage = .dynamic,
             .version = m.version,
         });
-
         lib.linkLibC();
-        b.installArtifact(lib);
+
+        const inst = b.addInstallArtifact(lib, .{});
+
+        const step_name = m.name;
+        const step_desc = std.fmt.allocPrint(b.allocator, "Build {s} module only", .{m.name}) catch unreachable;
+        const step = b.step(step_name, step_desc);
+        step.dependOn(&inst.step);
+
         map.putAssumeCapacity(m.name, lib);
     }
 
-    // Resolve links.
-    for (modules) |m| {
+    return map;
+}
+
+/// Link and import dependencies between previously compiled modules
+/// according to their manifests.
+fn resolveDeps(mods: []const ManifestModule, map: std.StringHashMap(*std.Build.Step.Compile)) void {
+    for (mods) |m| {
         const lib = map.get(m.name).?;
         for (m.deps) |d| {
-            const dep_lib = map.get(d) orelse std.debug.panic("unknown dependency '{s}' for '{s}'", .{ d, m.name });
-            lib.linkLibrary(dep_lib);
-            lib.root_module.addImport(d, dep_lib.root_module);
+            const dep = map.get(d) orelse std.debug.panic("unknown dependency '{s}' for '{s}'", .{ d, m.name });
+            lib.linkLibrary(dep);
+            lib.root_module.addImport(d, dep.root_module);
         }
     }
-
-    b.default_step.dependOn(&exe.step);
 }
 
 /// Module descriptor parsed from `manifest.json` found in each module directory.
@@ -85,8 +106,8 @@ const ManifestModule = struct {
     deps: []const []const u8 = &.{},
 };
 
-/// Read and parse `dir_name/manifest.json`.
-/// Returns a fully validated `ManifestModule` instance.
+/// Read and parse `dir_name/manifest.json` and return a validated
+/// `ManifestModule` description. Files larger than 256 KiB are rejected.
 fn readManifest(alloc: std.mem.Allocator, dir_name: []const u8) !ManifestModule {
     const path = try std.fs.path.join(alloc, &.{ dir_name, "manifest.json" });
     defer alloc.free(path);
@@ -95,7 +116,8 @@ fn readManifest(alloc: std.mem.Allocator, dir_name: []const u8) !ManifestModule 
     return parsed.value;
 }
 
-/// Discover all modules by scanning top-level sub-directories for a `manifest.json`.
+/// Scan the project root for sub-directories containing `manifest.json`
+/// and return a heap-allocated slice of all discovered module descriptors.
 fn discoverModules(alloc: std.mem.Allocator) ![]ManifestModule {
     var list = std.ArrayList(ManifestModule).init(alloc);
     var root = try std.fs.cwd().openDir(".", .{ .iterate = true });
