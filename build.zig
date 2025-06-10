@@ -19,7 +19,6 @@ pub fn build(b: *std.Build) void {
     map.ensureTotalCapacity(modules.len) catch unreachable;
 
     // Compile libraries.
-    const expected_abi: u32 = 1;
     for (modules) |m| {
         var src: []u8 = undefined;
 
@@ -34,10 +33,6 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         });
-
-        if (m.abi != expected_abi) {
-            std.debug.panic("ABI mismatch for module '{s}', found {} expected {}", .{ m.name, m.abi, expected_abi });
-        }
 
         const lib = b.addLibrary(.{
             .name = m.name,

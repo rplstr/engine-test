@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const init_fn = *const fn () void;
+const InitFn = *const fn () void;
 
 fn sharedName(alloc: std.mem.Allocator, mod: []const u8) ![]u8 {
     const ext = switch (builtin.os.tag) {
@@ -35,13 +35,12 @@ fn loadModule(
     defer alloc.free(path);
 
     var lib = try std.DynLib.open(path);
-
     try mods.append(lib);
 
-    const sym = try std.fmt.allocPrintZ(alloc, "{s}_init", .{name});
+    const sym = try std.fmt.allocPrintZ(alloc, "{s}_module_init", .{ name });
     defer alloc.free(sym);
 
-    const init = lib.lookup(init_fn, sym).?;
+    const init = lib.lookup(InitFn, sym).?;
     init();
 }
 
