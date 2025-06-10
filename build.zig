@@ -32,7 +32,7 @@ fn addRunner(b: *std.Build, target: std.Build.ResolvedTarget, opt: std.builtin.O
 /// return a mapping from module names to their compile steps.
 fn compileModules(b: *std.Build, mods: []const ManifestModule, target: std.Build.ResolvedTarget, opt: std.builtin.OptimizeMode) std.StringHashMap(*std.Build.Step.Compile) {
     var map = std.StringHashMap(*std.Build.Step.Compile).init(b.allocator);
-    map.ensureTotalCapacity(mods.len) catch unreachable;
+    map.ensureTotalCapacity(@intCast(mods.len)) catch unreachable;
 
     for (mods) |m| {
         const src = if (m.root_source_file.len != 0)
