@@ -35,10 +35,7 @@ fn compileModules(b: *std.Build, mods: []const ManifestModule, target: std.Build
     map.ensureTotalCapacity(@intCast(mods.len)) catch unreachable;
 
     for (mods) |m| {
-        const src = if (m.root_source_file.len != 0)
-            std.fs.path.join(b.allocator, &.{ m.name, m.root_source_file }) catch unreachable
-        else
-            std.fmt.allocPrint(b.allocator, "{s}/{s}.zig", .{ m.name, m.name }) catch unreachable;
+        const src = std.fmt.allocPrint(b.allocator, "{s}/{s}.zig", .{ m.name, m.name }) catch unreachable;
 
         const mod = b.addModule(m.name, .{
             .root_source_file = b.path(src),
@@ -53,6 +50,7 @@ fn compileModules(b: *std.Build, mods: []const ManifestModule, target: std.Build
             .version = m.version,
         });
         lib.linkLibC();
+        linkSystemLibraries(m, lib, target);
 
         const inst = b.addInstallArtifact(lib, .{});
         b.default_step.dependOn(&inst.step);
@@ -81,27 +79,56 @@ fn resolveDeps(mods: []const ManifestModule, map: std.StringHashMap(*std.Build.S
     }
 }
 
+/// Per-OS system-library lists for a module, loaded from `manifest.json`.
+/// Each field is an optional array of library names to link on that OS.
+/// Though modules should still explicitly specify libraries for every OS.
+const SysLibs = struct {
+    windows: ?[]const []const u8 = null,
+    linux: ?[]const []const u8 = null,
+    macos: ?[]const []const u8 = null,
+};
+
+/// Convert a `std.Target.Os.Tag` to the corresponding manifest key string:
+/// * `std.Target.Os.Tag.windows` => `windows`
+/// * `std.Target.Os.Tag.linux`   => `linux`
+/// * `std.Target.Os.Tag.macos`   => `macos`
+fn formatOsTag(tag: std.Target.Os.Tag) []const u8 {
+    return switch (tag) {
+        .windows => "windows",
+        .linux => "linux",
+        .macos => "macos",
+        else => std.debug.panic("unsupported OS: {}", .{tag}),
+    };
+}
+
+/// Link every system library declared for this module on the current OS.
+/// Reads `m.syslibs` for the target OS and calls `lib.linkSystemLibrary`.
+fn linkSystemLibraries(m: ManifestModule, lib: *std.Build.Step.Compile, target: std.Build.ResolvedTarget) void {
+    const os_tag = target.result.os.tag;
+    const libs_opt: ?[]const []const u8 = switch (os_tag) {
+        .windows => m.syslibs.windows,
+        .linux => m.syslibs.linux,
+        .macos => m.syslibs.macos,
+        else => std.debug.panic("unsupported OS: {}", .{os_tag}),
+    };
+
+    const libs = libs_opt orelse std.debug.panic(
+        "'{s}' has no syslibs entry for {s}",
+        .{ m.name, formatOsTag(os_tag) },
+    );
+
+    for (libs) |lib_name| {
+        lib.linkSystemLibrary(lib_name);
+    }
+}
+
 /// Module descriptor parsed from `manifest.json` found in each module directory.
-///
-/// ```json
-/// manifest.json
-/// {
-///   "name": "engine",
-///   "version": {"major":1,"minor":0,"patch":0},
-///   "root_source_file": "custom.zig",
-///   "deps": ["core"]
-/// }
-/// ```
-///
-/// * `name`     – folder name & library name.
-/// * `root_source_file` – entry .zig file relative to the module directory (defaults to `<name>.zig`).
-/// * `version`          – semantic version used for `.so/.dll` version info.
-/// * `deps`             – other module names this module links against.
 const ManifestModule = struct {
     name: []const u8,
-    root_source_file: []const u8 = "",
+    root_source_file: []const u8,
     version: std.SemanticVersion = .{ .major = 1, .minor = 0, .patch = 0 },
     deps: []const []const u8 = &.{},
+    syslibs: SysLibs = .{},
 };
 
 /// Read and parse `dir_name/manifest.json` and return a validated

@@ -1,9 +1,17 @@
 {
     "name": "game",
+    "root_source_file": "game.zig",
     "version": {
         "major": 1,
         "minor": 0,
         "patch": 0
+    },
+    "syslibs": {
+        "windows": [
+            "user32"
+        ],
+        "linux": [],
+        "macos": []
     },
     "deps": [
         "engine"
