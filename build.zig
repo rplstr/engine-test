@@ -87,7 +87,6 @@ fn resolveDeps(mods: []const ManifestModule, map: std.StringHashMap(*std.Build.S
 /// {
 ///   "name": "engine",
 ///   "version": {"major":1,"minor":0,"patch":0},
-///   "abi": 1,
 ///   "root_source_file": "custom.zig",
 ///   "deps": ["core"]
 /// }
@@ -96,13 +95,11 @@ fn resolveDeps(mods: []const ManifestModule, map: std.StringHashMap(*std.Build.S
 /// * `name`     – folder name & library name.
 /// * `root_source_file` – entry .zig file relative to the module directory (defaults to `<name>.zig`).
 /// * `version`          – semantic version used for `.so/.dll` version info.
-/// * `abi`              – numeric ABI revision checked at runtime.
 /// * `deps`             – other module names this module links against.
 const ManifestModule = struct {
     name: []const u8,
     root_source_file: []const u8 = "",
     version: std.SemanticVersion = .{ .major = 1, .minor = 0, .patch = 0 },
-    abi: u32 = 1,
     deps: []const []const u8 = &.{},
 };
 
