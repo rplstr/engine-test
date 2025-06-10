@@ -106,8 +106,6 @@ fn lookupSym(comptime T: type, lib: *std.DynLib, alloc: std.mem.Allocator, compt
 /// additional modules to load (excluding "engine"). When the
 /// file is absent return an empty slice so fallback can be used.
 fn readModuleList(alloc: std.mem.Allocator) ![]const []const u8 {
-    // Read modules.json if present. Duplicate each entry so we can
-    // safely free the temporary JSON structures and buffer.
     const path = "modules.json";
 
     var file = std.fs.cwd().openFile(path, .{}) catch |e| switch (e) {
@@ -116,7 +114,6 @@ fn readModuleList(alloc: std.mem.Allocator) ![]const []const u8 {
     };
     defer file.close();
 
-    // 1 MiB cap keeps allocation in check while remaining generous.
     const buf = try file.readToEndAlloc(alloc, 1 << 20);
     defer alloc.free(buf);
 
