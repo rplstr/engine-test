@@ -37,7 +37,10 @@ fn loadModule(
     var lib = try std.DynLib.open(path);
     try mods.append(lib);
 
-    const init = lib.lookup(InitFn, "module_init").?;
+    const sym = try std.fmt.allocPrintZ(alloc, "{s}_module_init", .{ name });
+    defer alloc.free(sym);
+
+    const init = lib.lookup(InitFn, sym).?;
     init();
 }
 

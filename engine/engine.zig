@@ -4,6 +4,6 @@ pub export fn print() void {
     std.debug.print("engine_print\n", .{});
 }
 
-pub export fn module_init() void {
+pub export fn engine_module_init() void {
     std.debug.print("(engine) module_init\n", .{});
 }

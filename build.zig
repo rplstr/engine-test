@@ -1,15 +1,62 @@
 const std = @import("std");
+const json = std.json;
 
-const Module = struct {
+/// Module descriptor parsed from `manifest.json` found in each module directory.
+///
+/// ```json
+/// manifest.json
+/// {
+///   "name": "engine",
+///   "version": {"major":1,"minor":0,"patch":0},
+///   "deps": ["core"]
+/// }
+/// ```
+///
+/// * `name`     – folder name & library name.
+/// * `version`  – semantic version used for `.so/.dll` version info.
+/// * `deps`     – other module names this module links against.
+const ManifestModule = struct {
     name: []const u8,
-    deps: []const []const u8,
+    version: std.SemanticVersion = .{ .major = 1, .minor = 0, .patch = 0 },
+    deps: []const []const u8 = &.{},
 };
+
+/// Read and parse `dir_name/manifest.json`.
+/// Returns a fully validated `ManifestModule` instance.
+fn readManifest(alloc: std.mem.Allocator, dir_name: []const u8) !ManifestModule {
+    const path = try std.fs.path.join(alloc, &.{ dir_name, "manifest.json" });
+    defer alloc.free(path);
+    const buf = try std.fs.cwd().readFileAlloc(alloc, path, 1 << 18);
+    const parsed = try json.parseFromSlice(ManifestModule, alloc, buf, .{});
+    return parsed.value;
+}
+
+/// Discover all modules by scanning top-level sub-directories for a `manifest.json`.
+fn discoverModules(alloc: std.mem.Allocator) ![]ManifestModule {
+    var list = std.ArrayList(ManifestModule).init(alloc);
+    var root = try std.fs.cwd().openDir(".", .{ .iterate = true });
+    defer root.close();
+
+    var it = root.iterate();
+
+    while (try it.next()) |entry| {
+        if (entry.kind != .directory) continue;
+        const m = readManifest(alloc, entry.name) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => return err,
+        };
+        try list.append(m);
+    }
+
+    return list.toOwnedSlice();
+}
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
 
-    // Runner.
+    const modules = discoverModules(b.allocator) catch |e| std.debug.panic("module discovery failed: {}", .{e});
+
     const exe = b.addExecutable(.{
         .name = "runner",
         .root_source_file = b.path("source/runner.zig"),
@@ -19,19 +66,14 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     b.installArtifact(exe);
 
-    // Modules.
-    const modules = [_]Module{
-        .{ .name = "engine", .deps = &.{} },
-        .{ .name = "game", .deps = &.{"engine"} },
-    };
-
     var map = std.StringHashMap(*std.Build.Step.Compile).init(b.allocator);
     map.ensureTotalCapacity(modules.len) catch unreachable;
 
-    inline for (modules) |m| {
-        const src = std.fmt.comptimePrint("{s}/{s}.zig", .{ m.name, m.name });
+    // Compile libraries.
+    for (modules) |m| {
+        const src = std.fmt.allocPrint(b.allocator, "{s}/{s}.zig", .{ m.name, m.name }) catch unreachable;
 
-        const module = b.addModule(m.name, .{
+        const mod = b.addModule(m.name, .{
             .root_source_file = b.path(src),
             .target = target,
             .optimize = optimize,
@@ -39,20 +81,24 @@ pub fn build(b: *std.Build) void {
 
         const lib = b.addLibrary(.{
             .name = m.name,
-            .root_module = module,
+            .root_module = mod,
             .linkage = .dynamic,
-            .version = .{ .major = 1, .minor = 0, .patch = 0 },
+            .version = m.version,
         });
-
-        for (m.deps) |dep| {
-            const dep_lib = map.get(dep).?;
-            lib.linkLibrary(dep_lib);
-            lib.root_module.addImport(dep, dep_lib.root_module);
-        }
 
         lib.linkLibC();
         b.installArtifact(lib);
         map.putAssumeCapacity(m.name, lib);
+    }
+
+    // Resolve links.
+    for (modules) |m| {
+        const lib = map.get(m.name).?;
+        for (m.deps) |d| {
+            const dep_lib = map.get(d) orelse std.debug.panic("unknown dependency '{s}' for '{s}'", .{ d, m.name });
+            lib.linkLibrary(dep_lib);
+            lib.root_module.addImport(d, dep_lib.root_module);
+        }
     }
 
     b.default_step.dependOn(&exe.step);
