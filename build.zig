@@ -68,7 +68,6 @@ pub fn build(b: *std.Build) void {
 ///   "version": {"major":1,"minor":0,"patch":0},
 ///   "abi": 1,
 ///   "root_source_file": "custom.zig",
-///   "symbols": ["init", "tick", "shutdown"],
 ///   "deps": ["core"]
 /// }
 /// ```
@@ -78,7 +77,6 @@ pub fn build(b: *std.Build) void {
 /// * `version`          – semantic version used for `.so/.dll` version info.
 /// * `abi`              – numeric ABI revision checked at runtime.
 /// * `deps`             – other module names this module links against.
-/// * `symbols`          – exported function names (e.g. init, tick, shutdown).
 const ManifestModule = struct {
     name: []const u8,
     root_source_file: []const u8 = "",
