@@ -4,160 +4,177 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
 
-    const modules = discoverModules(b.allocator) catch |e| std.debug.panic("module discovery failed: {}", .{e});
+    var arena = std.heap.ArenaAllocator.init(b.allocator);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
 
-    const exe = addRunner(b, target, optimize);
-    b.installArtifact(exe);
-    const map = compileModules(b, modules, target, optimize);
-    resolveDeps(modules, map);
+    const modules = discoverModules(arena_alloc) catch |err| {
+        std.debug.panic("module discovery failed: {any}", .{err});
+    };
 
-    b.default_step.dependOn(&exe.step);
-}
+    // This map will store reference to the compile step of each module.
+    var module_steps = std.StringHashMap(*std.Build.Step.Compile).init(b.allocator);
+    defer module_steps.deinit();
 
-/// Add the `runner` executable build step. Returns the compile step so
-/// the caller can attach dependencies.
-fn addRunner(b: *std.Build, target: std.Build.ResolvedTarget, opt: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    compileModules(b, target, optimize, modules, &module_steps);
+
     const exe = b.addExecutable(.{
         .name = "runner",
         .root_source_file = b.path("source/runner.zig"),
         .target = target,
-        .optimize = opt,
+        .optimize = optimize,
     });
-
     exe.linkLibC();
-    return exe;
-}
 
-/// Compile all discovered modules as dynamic libraries, install them, and
-/// return a mapping from module names to their compile steps.
-fn compileModules(b: *std.Build, mods: []const ManifestModule, target: std.Build.ResolvedTarget, opt: std.builtin.OptimizeMode) std.StringHashMap(*std.Build.Step.Compile) {
-    var map = std.StringHashMap(*std.Build.Step.Compile).init(b.allocator);
-    map.ensureTotalCapacity(@intCast(mods.len)) catch unreachable;
+    linkModules(exe, modules, &module_steps);
 
-    for (mods) |m| {
-        const src = std.fs.path.join(b.allocator, &.{ m.name, m.root_source_file }) catch unreachable;
+    b.installArtifact(exe);
 
-        const mod = b.addModule(m.name, .{
-            .root_source_file = b.path(src),
-            .target = target,
-            .optimize = opt,
-        });
+    // `zig build run`
+    const run_cmd = b.addRunArtifact(exe);
 
-        const lib = b.addLibrary(.{
-            .name = m.name,
-            .root_module = mod,
-            .linkage = .dynamic,
-            .version = m.version,
-        });
-        lib.linkLibC();
-        linkSystemLibraries(m, lib, target);
-
-        const inst = b.addInstallArtifact(lib, .{});
-        b.default_step.dependOn(&inst.step);
-
-        const step_name = m.name;
-        const step_desc = std.fmt.allocPrint(b.allocator, "Build {s} module only", .{m.name}) catch unreachable;
-        const step = b.step(step_name, step_desc);
-        step.dependOn(&inst.step);
-
-        map.putAssumeCapacity(m.name, lib);
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
     }
 
-    return map;
-}
+    const run_step = b.step("run", "Run the application");
 
-/// Link and import dependencies between previously compiled modules
-/// according to their manifests.
-fn resolveDeps(mods: []const ManifestModule, map: std.StringHashMap(*std.Build.Step.Compile)) void {
-    for (mods) |m| {
-        const lib = map.get(m.name).?;
-        for (m.deps) |d| {
-            const dep = map.get(d) orelse std.debug.panic("unknown dependency '{s}' for '{s}'", .{ d, m.name });
-            lib.linkLibrary(dep);
-            lib.root_module.addImport(d, dep.root_module);
-        }
-    }
+    run_step.dependOn(&run_cmd.step);
 }
 
 /// Per-OS system-library lists for a module, loaded from `manifest.json`.
-/// Each field is an optional array of library names to link on that OS.
-/// Though modules should still explicitly specify libraries for every OS.
 const SysLibs = struct {
     windows: ?[]const []const u8 = null,
     linux: ?[]const []const u8 = null,
     macos: ?[]const []const u8 = null,
 };
 
-/// Convert a `std.Target.Os.Tag` to the corresponding manifest key string:
-/// * `std.Target.Os.Tag.windows` => `windows`
-/// * `std.Target.Os.Tag.linux`   => `linux`
-/// * `std.Target.Os.Tag.macos`   => `macos`
-fn formatOsTag(tag: std.Target.Os.Tag) []const u8 {
-    return switch (tag) {
-        .windows => "windows",
-        .linux => "linux",
-        .macos => "macos",
-        else => std.debug.panic("unsupported OS: {}", .{tag}),
-    };
-}
-
-/// Link every system library declared for this module on the current OS.
-/// Reads `m.syslibs` for the target OS and calls `lib.linkSystemLibrary`.
-fn linkSystemLibraries(m: ManifestModule, lib: *std.Build.Step.Compile, target: std.Build.ResolvedTarget) void {
-    const os_tag = target.result.os.tag;
-    const libs_opt: ?[]const []const u8 = switch (os_tag) {
-        .windows => m.syslibs.windows,
-        .linux => m.syslibs.linux,
-        .macos => m.syslibs.macos,
-        else => std.debug.panic("unsupported OS: {}", .{os_tag}),
-    };
-
-    const libs = libs_opt orelse std.debug.panic(
-        "'{s}' has no syslibs entry for {s}",
-        .{ m.name, formatOsTag(os_tag) },
-    );
-
-    for (libs) |lib_name| {
-        lib.linkSystemLibrary(lib_name);
-    }
-}
-
 /// Module descriptor parsed from `manifest.json` found in each module directory.
 const ManifestModule = struct {
     name: []const u8,
-    root_source_file: []const u8 = "",
+    root_source_file: []const u8,
     version: std.SemanticVersion = .{ .major = 1, .minor = 0, .patch = 0 },
     deps: []const []const u8 = &.{},
     syslibs: SysLibs = .{},
 };
 
-/// Read and parse `dir_name/manifest.json` and return a validated
-/// `ManifestModule` description. Files larger than 256 KiB are rejected.
-fn readManifest(alloc: std.mem.Allocator, dir_name: []const u8) !ManifestModule {
-    const path = try std.fs.path.join(alloc, &.{ dir_name, "manifest.json" });
-    defer alloc.free(path);
-    const buf = try std.fs.cwd().readFileAlloc(alloc, path, 1 << 18);
-    const parsed = try std.json.parseFromSlice(ManifestModule, alloc, buf, .{});
-    return parsed.value;
-}
-
-/// Scan the project root for sub-directories containing `manifest.json`
-/// and return a heap-allocated slice of all discovered module descriptors.
+/// Scans the project root for sub-directories containing `manifest.json`.
+/// `alloc` is expected to be an arena.
 fn discoverModules(alloc: std.mem.Allocator) ![]ManifestModule {
     var list = std.ArrayList(ManifestModule).init(alloc);
     var root = try std.fs.cwd().openDir(".", .{ .iterate = true });
     defer root.close();
 
     var it = root.iterate();
-
     while (try it.next()) |entry| {
         if (entry.kind != .directory) continue;
-        const man = readManifest(alloc, entry.name) catch |err| switch (err) {
+
+        const manifest = readManifest(alloc, entry.name) catch |err| switch (err) {
             error.FileNotFound => continue,
             else => return err,
         };
-        try list.append(man);
+        try list.append(manifest);
     }
-
     return list.toOwnedSlice();
+}
+
+/// Compiles all discovered modules, populating the `module_steps` map.
+/// On bare metal or WASI the linkage is static, dynamic on all other operating systems.
+fn compileModules(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    modules: []const ManifestModule,
+    module_steps: *std.StringHashMap(*std.Build.Step.Compile),
+) void {
+    const is_static_build = switch (target.result.os.tag) {
+        .wasi, .freestanding => true,
+        else => false,
+    };
+
+    for (modules) |m| {
+        const src_path = b.pathJoin(&.{ m.name, m.root_source_file });
+
+        const mod_mod = b.addModule(m.name, .{
+            .root_source_file = b.path(src_path),
+            .target = target,
+            .optimize = optimize,
+        });
+
+        const mod_lib = b.addLibrary(.{
+            .name = m.name,
+            .root_module = mod_mod,
+            .linkage = if (is_static_build) .static else .dynamic,
+            .version = m.version,
+        });
+        mod_lib.linkLibC();
+
+        if (!is_static_build) {
+            b.installArtifact(mod_lib);
+        }
+
+        linkSystemLibraries(m, mod_lib, target.result.os.tag);
+        module_steps.put(m.name, mod_lib) catch unreachable;
+    }
+}
+
+/// Links modules to the main executable and resolves dependencies.
+fn linkModules(
+    exe: *std.Build.Step.Compile,
+    modules: []const ManifestModule,
+    module_steps: *std.StringHashMap(*std.Build.Step.Compile),
+) void {
+    const is_static_build = switch (exe.rootModuleTarget().os.tag) {
+        .wasi, .freestanding => true,
+        else => false,
+    };
+
+    for (modules) |m| {
+        const mod_lib = module_steps.get(m.name).?;
+
+        for (m.deps) |dep_name| {
+            const dep_lib = module_steps.get(dep_name) orelse std.debug.panic(
+                "unknown dependency '{s}' for module '{s}'",
+                .{ dep_name, m.name },
+            );
+
+            mod_lib.root_module.addImport(dep_name, dep_lib.root_module);
+            mod_lib.linkLibrary(dep_lib);
+        }
+
+        // In a static build we will link all libraries directly into the runner.
+        if (is_static_build) {
+            exe.linkLibrary(mod_lib);
+        }
+    }
+}
+
+/// Links system libraries specified in the module's manifest for the current target OS.
+fn linkSystemLibraries(m: ManifestModule, lib: *std.Build.Step.Compile, os_tag: std.Target.Os.Tag) void {
+    const libs_for_os = switch (os_tag) {
+        .windows => m.syslibs.windows,
+        .linux => m.syslibs.linux,
+        .macos => m.syslibs.macos,
+        else => null,
+    };
+
+    if (libs_for_os) |libs| {
+        for (libs) |lib_name| {
+            lib.linkSystemLibrary(lib_name);
+        }
+    }
+}
+
+/// Reads and parses `dir/manifest.json`.
+fn readManifest(alloc: std.mem.Allocator, dir_name: []const u8) !ManifestModule {
+    const path = try std.fs.path.join(alloc, &.{ dir_name, "manifest.json" });
+
+    const max_file_size = 256 * 1024;
+    const buf = try std.fs.cwd().readFileAlloc(alloc, path, max_file_size);
+
+    const parsed = try std.json.parseFromSlice(ManifestModule, alloc, buf, .{
+        .ignore_unknown_fields = true,
+    });
+
+    return parsed.value;
 }
