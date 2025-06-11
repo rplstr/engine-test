@@ -1,5 +1,6 @@
 {
     "modules": [
+        "engine",
         "game"
     ]
 }
