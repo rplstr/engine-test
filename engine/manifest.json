@@ -6,9 +6,10 @@
         "minor": 0,
         "patch": 0
     },
-    "syslibs": {
+    "system_libraries": {
         "windows": [],
         "linux": [],
         "macos": []
-    }
+    },
+    "dependencies": []
 }
