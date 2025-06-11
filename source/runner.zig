@@ -1,191 +1,166 @@
 const std = @import("std");
-const log = std.log;
 const builtin = @import("builtin");
 
-/// Defines the type signature for a module's initialization function.
-const init_fn = *const fn (allocator: *std.mem.Allocator) callconv(.C) void;
-/// Defines the type signature for a module's de-initialization function.
-const deinit_fn = *const fn () callconv(.C) void;
+/// A function pointer to a module's initialization function.
+pub const init_fn = *const fn (*std.mem.Allocator) callconv(.C) void;
 
-/// Represents a single, successfully loaded dynamic module at runtime.
-pub const Module = struct {
-    /// The handle to the opened dynamic library (.so, .dll, etc.).
-    lib: std.DynLib,
-    /// A cached function pointer to the module's `_deinit` function.
-    deinit: deinit_fn,
-    /// A heap-allocated copy of the module's name, used for identification and cleanup.
-    name: []const u8,
-};
+/// A function pointer to a module's deinitialization function.
+pub const deinit_fn = *const fn () callconv(.C) void;
 
-comptime {
-    if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) {
-        @compileError("dynamic loading is unavailable for this target");
-    }
-}
+/// Maximum number of modules that can be loaded at once.
+pub const max_modules = 128;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var alloc = gpa.allocator();
+    if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding)
+        @compileError("Dynamic modules are not supported on this target.");
 
-    var loaded_modules = std.ArrayList(Module).init(alloc);
-    defer unloadAll(&loaded_modules);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-    const manifest_modules = try readModuleList(alloc);
+    var bank = try ModuleBank.init(&arena.allocator());
+    defer bank.deinit() catch unreachable;
 
-    defer {
-        for (manifest_modules) |m| alloc.free(m);
-        alloc.free(manifest_modules);
+    try loadManifest(arena.allocator(), "modules.json", &bank);
+}
+
+/// Compact store for loaded modules.
+pub const ModuleBank = struct {
+    allocator: *const std.mem.Allocator,
+    libs: [max_modules]std.DynLib = undefined,
+    deinits: [max_modules]deinit_fn = undefined,
+    name_offs: [max_modules]u32 = undefined,
+    count: u32 = 0,
+    blob: std.ArrayList(u8),
+
+    /// Creates an empty bank that allocates from `allocator`.
+    pub fn init(allocator: *const std.mem.Allocator) !ModuleBank {
+        return ModuleBank{
+            .allocator = allocator,
+            .blob = try std.ArrayList(u8).initCapacity(allocator.*, 4096),
+        };
     }
 
-    if (manifest_modules.len == 0) {
-        log.info("no modules to load", .{});
-        return;
-    }
-
-    log.info("manifest has {d} valid modules to load", .{manifest_modules.len});
-
-    for (manifest_modules) |mod_name| {
-        if (hasLoaded(&loaded_modules, mod_name)) {
-            log.warn("skipping duplicate module in manifest: {s}", .{mod_name});
-            continue;
+    /// Calls every `deinit`, closes every library, and frees all memory.
+    pub fn deinit(self: *ModuleBank) !void {
+        var i: usize = self.count;
+        while (i > 0) : (i -= 1) {
+            self.deinits[i - 1]();
+            self.libs[i - 1].close();
         }
-
-        try loadModule(&alloc, &loaded_modules, mod_name);
-    }
-}
-
-/// De-initializes and unloads all modules in the provided list.
-pub fn unloadAll(mods: *std.ArrayList(Module)) void {
-    if (mods.items.len == 0) return;
-
-    log.info("unloading {d} total modules", .{mods.items.len});
-
-    var i = mods.items.len;
-    while (i > 0) {
-        i -= 1;
-        var m = &mods.items[i];
-
-        log.info("* '{s}'", .{m.name});
-        m.deinit();
-
-        m.lib.close();
-        mods.allocator.free(m.name);
-    }
-    log.info("done", .{});
-    mods.deinit();
-}
-
-/// Dynamically loads a single module by name.
-fn loadModule(alloc: *std.mem.Allocator, list: *std.ArrayList(Module), name: []const u8) !void {
-    const path = try libPath(alloc.*, name);
-    defer alloc.free(path);
-
-    log.debug("opening library for module '{s}' from {s}", .{ name, path });
-    var lib = try std.DynLib.open(path);
-
-    errdefer lib.close();
-
-    const init = try lookupSym(init_fn, &lib, alloc.*, "{s}_init", name);
-    const deinit = try lookupSym(deinit_fn, &lib, alloc.*, "{s}_deinit", name);
-
-    log.debug("initializing module '{s}'", .{name});
-    init(alloc);
-
-    const stored_name = try alloc.dupe(u8, name);
-
-    errdefer alloc.free(stored_name);
-
-    try list.append(.{
-        .lib = lib,
-        .deinit = deinit,
-        .name = stored_name,
-    });
-
-    log.info("done", .{});
-}
-
-/// Checks if a module with the given name has already been loaded.
-fn hasLoaded(list: *const std.ArrayList(Module), name: []const u8) bool {
-    for (list.items) |m| {
-        if (std.mem.eql(u8, m.name, name)) return true;
-    }
-    return false;
-}
-
-/// Reads and parses the `modules.json` manifest file from the current directory.
-fn readModuleList(alloc: std.mem.Allocator) ![][]const u8 {
-    const manifest_path = "modules.json";
-
-    const file = std.fs.cwd().openFile(manifest_path, .{}) catch |e| switch (e) {
-        error.FileNotFound => {
-            log.warn("manifest '{s}' not found, no modules will be loaded", .{manifest_path});
-            return alloc.alloc([]const u8, 0);
-        },
-        else => |err| {
-            log.err("could not open manifest '{s}': {any}", .{ manifest_path, err });
-            return err;
-        },
-    };
-    defer file.close();
-
-    const buf = try file.readToEndAlloc(alloc, 1 * 1024 * 1024);
-    defer alloc.free(buf);
-
-    const Manifest = struct { modules: []const []const u8 = &.{} };
-    var parsed = try std.json.parseFromSlice(Manifest, alloc, buf, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-
-    const src_modules = parsed.value.modules;
-    if (src_modules.len == 0) {
-        log.info("manifest '{s}' is empty or contains no modules", .{manifest_path});
-        return alloc.alloc([]const u8, 0);
+        self.blob.deinit();
     }
 
-    var out_modules = try alloc.alloc([]const u8, src_modules.len);
-
-    errdefer {
-        for (out_modules) |m| alloc.free(m);
-        alloc.free(out_modules);
+    /// Returns `true` when `name` already exists in the bank.
+    pub fn contains(self: *ModuleBank, name: []const u8) bool {
+        for (0..self.count) |idx| {
+            if (std.mem.eql(u8, self.getName(idx), name)) return true;
+        }
+        return false;
     }
 
-    for (src_modules, 0..) |m, i| {
-        out_modules[i] = try alloc.dupe(u8, m);
+    /// Stores a fully-initialised module.
+    pub fn append(self: *ModuleBank, lib: std.DynLib, deinit_fn_ptr: deinit_fn, name: []const u8) !void {
+        if (self.count == max_modules) return error.TooManyModules;
+
+        const start = @as(u32, @intCast(self.blob.items.len));
+        try self.blob.appendSlice(name);
+        try self.blob.append(0);
+
+        const idx = self.count;
+        self.libs[idx] = lib;
+        self.deinits[idx] = deinit_fn_ptr;
+        self.name_offs[idx] = start;
+        self.count += 1;
     }
 
-    return out_modules;
-}
+    /// Returns the stored module name at `idx`.
+    pub fn getName(self: *ModuleBank, idx: usize) []const u8 {
+        const off = self.name_offs[idx];
+        const slice = self.blob.items[off..];
+        return slice[0..std.mem.indexOf(u8, slice, "\x00").?];
+    }
+};
 
-/// Composes the platform-specific shared library filename for a given module name.
+/// Composes the platform-specific shared-library filename.
 ///
-/// For example, "engine" becomes "libengine.so" on Linux, "engine.dll" on
-/// Windows, and "engine.dylib" on macOS.
-fn sharedName(alloc: std.mem.Allocator, mod_name: []const u8) ![]u8 {
-    const prefix = if (builtin.os.tag == .windows) "" else "lib";
+/// `"engine"` becomes `"libengine.so"` on Linux, `"engine.dll"` on Windows,
+/// and `"engine.dylib"` on macOS.
+fn makeSharedName(allocator: std.mem.Allocator, mod: []const u8) ![]u8 {
     const suffix = switch (builtin.os.tag) {
         .windows => ".dll",
         .macos => ".dylib",
         else => ".so",
     };
-    return std.fmt.allocPrint(alloc, "{s}{s}{s}", .{ prefix, mod_name, suffix });
-}
-
-/// Creates an absolute path to a module's shared library file.
-fn libPath(alloc: std.mem.Allocator, mod_name: []const u8) ![]u8 {
-    const dir = try std.fs.selfExeDirPathAlloc(alloc);
-    defer alloc.free(dir);
-    const name = try sharedName(alloc, mod_name);
-    defer alloc.free(name);
-    return std.fs.path.join(alloc, &.{ dir, name });
-}
-
-/// Looks up a symbol by name within a given dynamic library.
-fn lookupSym(comptime T: type, lib: *std.DynLib, alloc: std.mem.Allocator, comptime fmt: []const u8, mod_name: []const u8) !T {
-    const sym_name = try std.fmt.allocPrintZ(alloc, fmt, .{mod_name});
-    defer alloc.free(sym_name);
-
-    return lib.lookup(T, sym_name) orelse {
-        log.err("missing required symbol '{s}' in module '{s}'", .{ sym_name, mod_name });
-        return error.MissingSymbol;
+    const prefix = switch (builtin.os.tag) {
+        .windows => "",
+        else => "lib",
     };
+    return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ prefix, mod, suffix });
+}
+
+/// Returns an absolute path to the module’s shared library.
+fn makeLibraryPath(allocator: std.mem.Allocator, mod: []const u8) ![]u8 {
+    const dir = try std.fs.selfExeDirPathAlloc(allocator);
+    defer allocator.free(dir);
+    const name = try makeSharedName(allocator, mod);
+    defer allocator.free(name);
+    return std.fs.path.join(allocator, &.{ dir, name });
+}
+
+/// Looks up a formatted symbol within `lib`.
+fn findSymbol(comptime T: type, lib: *std.DynLib, allocator: std.mem.Allocator, comptime fmt: []const u8, mod: []const u8) !T {
+    const symbol = try std.fmt.allocPrintZ(allocator, fmt, .{mod});
+    defer allocator.free(symbol);
+    return lib.lookup(T, symbol) orelse return error.MissingSymbol;
+}
+
+/// Reads a JSON manifest of the form
+///
+/// ```json
+/// { "modules": [ "engine", "render", "audio" ] }
+/// ```
+///
+/// Every string inside `"modules"` is passed to `loadModule`.
+/// Duplicates are ignored.
+fn loadManifest(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    bank: *ModuleBank,
+) !void {
+    var file = std.fs.cwd().openFile(path, .{}) catch |e|
+        switch (e) {
+            error.FileNotFound => return,
+            else => |err| return err,
+        };
+    defer file.close();
+
+    const buf = try file.readToEndAlloc(allocator, 1 * 1024 * 1024);
+    defer allocator.free(buf);
+
+    const Manifest = struct { modules: []const []const u8 = &.{} };
+    var parsed = try std.json.parseFromSlice(Manifest, allocator, buf, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    for (parsed.value.modules) |name| {
+        if (bank.contains(name)) continue;
+        try loadModule(bank, name);
+    }
+}
+/// Dynamically loads `mod`, runs `<mod>_init`, and stores the handle.
+fn loadModule(bank: *ModuleBank, mod: []const u8) !void {
+    const lib_path = try makeLibraryPath(bank.allocator.*, mod);
+    defer bank.allocator.free(lib_path);
+
+    std.log.info("opening library for module '{s}' -> {s}", .{ mod, lib_path });
+
+    var lib = try std.DynLib.open(lib_path);
+    errdefer lib.close();
+
+    const init = try findSymbol(init_fn, &lib, bank.allocator.*, "{s}_init", mod);
+    const deinit = try findSymbol(deinit_fn, &lib, bank.allocator.*, "{s}_deinit", mod);
+
+    init(@constCast(bank.allocator));
+    errdefer deinit();
+
+    try bank.append(lib, deinit, mod);
 }
