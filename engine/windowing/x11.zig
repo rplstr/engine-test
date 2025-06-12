@@ -1,11 +1,14 @@
+//! X11 backend for the windowing sub-module.
+
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
     @cInclude("X11/Xutil.h");
 });
 const WEvent = @import("window.zig").WEvent;
+const WDescription = @import("window.zig").WDescription;
 
 /// Do not invoke directly; use `w_open_window` instead.
-pub fn openWindow(description: anytype) u64 {
+pub fn openWindow(description: WDescription) u64 {
     const display = x11.XOpenDisplay(null) orelse return 0;
     const screen = x11.XDefaultScreen(display);
 
@@ -30,7 +33,7 @@ pub fn openWindow(description: anytype) u64 {
 }
 
 /// Do not invoke directly; use `w_poll` instead.
-pub fn poll(handle: u64, event: *WEvent) bool {
+pub fn poll(out: *WEvent) bool {
     const display = x11.XOpenDisplay(null) orelse return false;
 
     if (x11.XPending(display) == 0) {
@@ -44,10 +47,8 @@ pub fn poll(handle: u64, event: *WEvent) bool {
     var got = false;
     switch (xevent.type) {
         x11.DestroyNotify => {
-            if (xevent.xdestroywindow.window == @as(c_ulong, @intCast(handle))) {
-                event.* = .{ .kind = .close, .code = 0 };
-                got = true;
-            }
+            out.* = .{ .kind = .close, .code = 0 };
+            got = true;
         },
         else => {},
     }

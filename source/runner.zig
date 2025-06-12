@@ -14,9 +14,11 @@ pub const InitFn = *const fn (*std.mem.Allocator) callconv(.c) void;
 pub const DeinitFn = *const fn () callconv(.c) void;
 
 /// Pointer to a frame-update routine exported as `<name>_update`.
-/// Optional.
-pub const UpdateFn = *const fn (f64) callconv(.c) void;
-fn noUpdate(_: f64) callconv(.c) void {}
+/// Optional. Return `false` to request exit.
+pub const UpdateFn = *const fn (f64) callconv(.c) bool;
+fn noUpdate(_: f64) callconv(.c) bool {
+    return true;
+}
 
 pub fn main() !void {
     if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding)
@@ -31,12 +33,12 @@ pub fn main() !void {
     try loadManifest(arena.allocator(), "modules.json", &bank);
 
     var last = std.time.nanoTimestamp();
-    while (true) {
-        const now = std.time.nanoTimestamp();
-        const dt = @as(f64, @floatFromInt(now - last)) / 1e9;
-        last = now;
+    var dt: f64 = 0;
 
-        bank.updateAll(dt);
+    while (bank.updateAll(dt)) {
+        const now = std.time.nanoTimestamp();
+        dt = @as(f64, @floatFromInt(now - last)) / 1e9;
+        last = now;
     }
 }
 
@@ -84,8 +86,9 @@ const ModuleBank = struct {
         return false;
     }
 
-    pub fn updateAll(self: *ModuleBank, delta: f64) void {
-        for (0..@intCast(self.cnt)) |i| self.update[i](delta);
+    pub fn updateAll(self: *ModuleBank, delta: f64) bool {
+        for (0..@intCast(self.cnt)) |i| if (!self.update[i](delta)) return false;
+        return true;
     }
 
     /// Append a module to the bank.

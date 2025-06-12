@@ -9,7 +9,10 @@ const wnd_class: [*:0]const u8 = @ptrCast("wnd");
 const def_title: [*:0]const u8 = @ptrCast("zig");
 
 export fn wndProc(handle: w32.HWND, msg: w32.UINT, wparam: w32.WPARAM, lparam: w32.LPARAM) callconv(.c) w32.LRESULT {
-    if (msg == w32.WM_DESTROY) return 0;
+    if (msg == w32.WM_DESTROY) {
+        w32.PostQuitMessage(0);
+        return 0;
+    }
     return w32.DefWindowProcA(handle, msg, wparam, lparam);
 }
 
@@ -60,17 +63,16 @@ pub fn openWindow(description: WDescription) u64 {
 }
 
 /// Do not invoke directly; use `w_poll` instead.
-pub fn poll(handle: u64, event: *WEvent) bool {
+pub fn poll(out: *WEvent) bool {
     var msg: w32.MSG = undefined;
-    const hwnd = @as(w32.HWND, @ptrFromInt(handle));
 
-    if (w32.PeekMessageA(&msg, hwnd, 0, 0, w32.PM_REMOVE) == 0) {
+    if (w32.PeekMessageA(&msg, null, 0, 0, w32.PM_REMOVE) == 0) {
         return false;
     }
 
     switch (msg.message) {
-        w32.WM_CLOSE, w32.WM_DESTROY => {
-            event.* = .{ .kind = .close, .code = 0 };
+        w32.WM_CLOSE, w32.WM_QUIT => {
+            out.* = .{ .kind = .close, .code = 0 };
             return true;
         },
         else => {

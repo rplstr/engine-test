@@ -23,7 +23,7 @@ pub const WEvent = extern struct {
 
 const Backend = switch (builtin.os.tag) {
     .windows => @import("win32.zig"),
-    // TODO: wayland
+    // TODO: wayland, cocoa
     else => @import("x11.zig"),
 };
 
@@ -33,8 +33,8 @@ pub export fn w_open_window(description: *const WDescription) callconv(.c) u64 {
 }
 
 /// Non-blocking. Returns `true` if an event for `handle` was placed in `out`.
-pub export fn w_poll(handle: u64, out: *WEvent) callconv(.c) bool {
-    return Backend.poll(handle, out);
+pub export fn w_poll(out: *WEvent) callconv(.c) bool {
+    return Backend.poll(out);
 }
 
 /// Destroys a window previously created by `w_open_window`.
