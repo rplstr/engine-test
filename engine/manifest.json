@@ -7,8 +7,12 @@
         "patch": 0
     },
     "system_libraries": {
-        "windows": [],
-        "linux": [],
+        "windows": [
+            "user32"
+        ],
+        "linux": [
+            "X11"
+        ],
         "macos": []
     },
     "dependencies": []
