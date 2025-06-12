@@ -8,7 +8,7 @@ const WEvent = @import("window.zig").WEvent;
 const wnd_class: [*:0]const u8 = @ptrCast("wnd");
 const def_title: [*:0]const u8 = @ptrCast("zig");
 
-export fn wndProc(handle: w32.HWND, msg: w32.UINT, wparam: w32.WPARAM, lparam: w32.LPARAM) callconv(.C) w32.LRESULT {
+export fn wndProc(handle: w32.HWND, msg: w32.UINT, wparam: w32.WPARAM, lparam: w32.LPARAM) callconv(.c) w32.LRESULT {
     if (msg == w32.WM_DESTROY) return 0;
     return w32.DefWindowProcA(handle, msg, wparam, lparam);
 }

@@ -28,16 +28,16 @@ const Backend = switch (builtin.os.tag) {
 };
 
 /// Creates and shows a native window.
-pub export fn w_open_window(description: *const WDescription) callconv(.C) u64 {
+pub export fn w_open_window(description: *const WDescription) callconv(.c) u64 {
     return Backend.openWindow(description.*);
 }
 
 /// Non-blocking. Returns `true` if an event for `handle` was placed in `out`.
-pub export fn w_poll(handle: u64, out: *WEvent) callconv(.C) bool {
+pub export fn w_poll(handle: u64, out: *WEvent) callconv(.c) bool {
     return Backend.poll(handle, out);
 }
 
 /// Destroys a window previously created by `w_open_window`.
-pub export fn w_close_window(handle: u64) callconv(.C) void {
+pub export fn w_close_window(handle: u64) callconv(.c) void {
     Backend.closeWindow(handle);
 }

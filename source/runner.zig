@@ -8,15 +8,15 @@ pub const engine_abi_version = 1;
 pub const max_modules = 128;
 
 /// Pointer to module initializer exported as `<name>_init`.
-pub const InitFn = *const fn (*std.mem.Allocator) callconv(.C) void;
+pub const InitFn = *const fn (*std.mem.Allocator) callconv(.c) void;
 
 /// Pointer to module de-initializer exported as `<name>_deinit`.
-pub const DeinitFn = *const fn () callconv(.C) void;
+pub const DeinitFn = *const fn () callconv(.c) void;
 
 /// Pointer to a frame-update routine exported as `<name>_update`.
 /// Optional.
-pub const UpdateFn = *const fn (f64) callconv(.C) void;
-fn noUpdate(_: f64) callconv(.C) void {}
+pub const UpdateFn = *const fn (f64) callconv(.c) void;
+fn noUpdate(_: f64) callconv(.c) void {}
 
 pub fn main() !void {
     if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding)
