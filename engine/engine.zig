@@ -1,5 +1,7 @@
 const std = @import("std");
 
+export const engine_abi: u32 = 1;
+
 export fn engine_init(alloc: *std.mem.Allocator) callconv(.C) void {
     _ = alloc;
     std.debug.print("(engine) module_init\n", .{});

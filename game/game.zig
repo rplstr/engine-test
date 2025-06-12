@@ -4,6 +4,8 @@ const c = @cImport({
     @cInclude("windows.h");
 });
 
+export const game_abi: u32 = 1;
+
 export fn game_init(alloc: *std.mem.Allocator) callconv(.C) void {
     _ = alloc;
     std.debug.print("(game) module_init\n", .{});

@@ -1,14 +1,17 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-/// A function pointer to a module's initialization function.
-pub const init_fn = *const fn (*std.mem.Allocator) callconv(.C) void;
+/// Engine/plug-in ABI version required by this build.
+pub const engine_abi_version = 1;
 
-/// A function pointer to a module's deinitialization function.
-pub const deinit_fn = *const fn () callconv(.C) void;
-
-/// Maximum number of modules that can be loaded at once.
+/// Maximum number of concurrently loaded modules.
 pub const max_modules = 128;
+
+/// Pointer to module initializer exported as `<name>_init`.
+pub const InitFn = *const fn (*std.mem.Allocator) callconv(.C) void;
+
+/// Pointer to module de-initializer exported as `<name>_deinit`.
+pub const DeinitFn = *const fn () callconv(.C) void;
 
 pub fn main() !void {
     if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding)
@@ -23,110 +26,113 @@ pub fn main() !void {
     try loadManifest(arena.allocator(), "modules.json", &bank);
 }
 
-/// Compact store for loaded modules.
-pub const ModuleBank = struct {
-    allocator: *const std.mem.Allocator,
+/// Contiguous store that tracks every live module.
+const ModuleBank = struct {
+    /// Allocator handed to modules.
+    alloc: *const std.mem.Allocator,
+    /// Handles returned by `std.DynLib.open`.
     libs: [max_modules]std.DynLib = undefined,
-    deinits: [max_modules]deinit_fn = undefined,
-    name_offs: [max_modules]u32 = undefined,
-    count: u32 = 0,
+    /// Corresponding `*_deinit` pointers.
+    dein: [max_modules]DeinitFn = undefined,
+    /// Offset of zero-terminated name inside `blob`.
+    offs: [max_modules]u32 = undefined,
+    /// Active slot count.
+    cnt: u32 = 0,
+    /// Packed, null-delimited name storage.
     blob: std.ArrayList(u8),
 
-    /// Creates an empty bank that allocates from `allocator`.
+    pub const Error = error{ TooManyModules, OutOfMemory };
+
+    /// Create an empty bank that allocates from `allocator`.
     pub fn init(allocator: *const std.mem.Allocator) !ModuleBank {
-        return ModuleBank{
-            .allocator = allocator,
-            .blob = try std.ArrayList(u8).initCapacity(allocator.*, 4096),
+        return .{
+            .alloc = allocator,
+            .blob = try std.ArrayList(u8).initCapacity(allocator.*, 4 * 1024),
         };
     }
 
-    /// Calls every `deinit`, closes every library, and frees all memory.
+    /// Call each `*_deinit` and close all libraries in reverse order.
     pub fn deinit(self: *ModuleBank) !void {
-        var i: usize = self.count;
-        while (i > 0) : (i -= 1) {
-            self.deinits[i - 1]();
-            self.libs[i - 1].close();
+        while (self.cnt > 0) {
+            self.cnt -= 1;
+            self.dein[self.cnt]();
+            self.libs[self.cnt].close();
         }
         self.blob.deinit();
     }
 
-    /// Returns `true` when `name` already exists in the bank.
+    /// `true` if `name` already exists in the bank.
     pub fn contains(self: *ModuleBank, name: []const u8) bool {
-        for (0..self.count) |idx| {
-            if (std.mem.eql(u8, self.getName(idx), name)) return true;
-        }
+        for (0..@as(usize, self.cnt)) |i|
+            if (std.mem.eql(u8, self.getName(i), name)) return true;
         return false;
     }
 
-    /// Stores a fully-initialised module.
-    pub fn append(self: *ModuleBank, lib: std.DynLib, deinit_fn_ptr: deinit_fn, name: []const u8) !void {
-        if (self.count == max_modules) return error.TooManyModules;
+    /// Append a module to the bank.
+    pub fn append(self: *ModuleBank, lib: std.DynLib, dein: DeinitFn, name: []const u8) Error!void {
+        if (self.cnt == max_modules) return error.TooManyModules;
 
-        const start = @as(u32, @intCast(self.blob.items.len));
+        const off = @as(u32, @intCast(self.blob.items.len));
         try self.blob.appendSlice(name);
         try self.blob.append(0);
 
-        const idx = self.count;
+        const idx = self.cnt;
         self.libs[idx] = lib;
-        self.deinits[idx] = deinit_fn_ptr;
-        self.name_offs[idx] = start;
-        self.count += 1;
+        self.dein[idx] = dein;
+        self.offs[idx] = off;
+        self.cnt += 1;
     }
 
-    /// Returns the stored module name at `idx`.
+    /// Retrieve the null-terminated name stored at `idx`.
     pub fn getName(self: *ModuleBank, idx: usize) []const u8 {
-        const off = self.name_offs[idx];
-        const slice = self.blob.items[off..];
-        return slice[0..std.mem.indexOf(u8, slice, "\x00").?];
+        const base = self.offs[idx];
+        const bytes = self.blob.items[base..];
+        const end = std.mem.indexOfScalar(u8, bytes, 0).?;
+        return bytes[0..end];
     }
 };
 
-/// Composes the platform-specific shared-library filename.
-///
-/// `"engine"` becomes `"libengine.so"` on Linux, `"engine.dll"` on Windows,
-/// and `"engine.dylib"` on macOS.
-fn makeSharedName(allocator: std.mem.Allocator, mod: []const u8) ![]u8 {
+/// Returns a platform-specific shared library filename.
+/// ```
+/// "engine" => "libengine.so" (Linux)
+/// "engine" => "engine.dll"   (Windows)
+/// "engine" => "engine.dylib" (macOS)
+/// ```
+fn makeSharedName(allocator: std.mem.Allocator, mod_name: []const u8) ![]u8 {
     const suffix = switch (builtin.os.tag) {
         .windows => ".dll",
         .macos => ".dylib",
         else => ".so",
     };
-    const prefix = switch (builtin.os.tag) {
-        .windows => "",
-        else => "lib",
-    };
-    return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ prefix, mod, suffix });
+    const prefix = if (builtin.os.tag == .windows) "" else "lib";
+    return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ prefix, mod_name, suffix });
 }
 
-/// Returns an absolute path to the module’s shared library.
-fn makeLibraryPath(allocator: std.mem.Allocator, mod: []const u8) ![]u8 {
+/// Returns an absolute filesystem path to `mod_name`’s shared library.
+fn makeLibraryPath(allocator: std.mem.Allocator, mod_name: []const u8) ![]u8 {
     const dir = try std.fs.selfExeDirPathAlloc(allocator);
     defer allocator.free(dir);
-    const name = try makeSharedName(allocator, mod);
-    defer allocator.free(name);
-    return std.fs.path.join(allocator, &.{ dir, name });
+    const file = try makeSharedName(allocator, mod_name);
+    defer allocator.free(file);
+    return std.fs.path.join(allocator, &.{ dir, file });
 }
 
-/// Looks up a formatted symbol within `lib`.
-fn findSymbol(comptime T: type, lib: *std.DynLib, allocator: std.mem.Allocator, comptime fmt: []const u8, mod: []const u8) !T {
-    const symbol = try std.fmt.allocPrintZ(allocator, fmt, .{mod});
-    defer allocator.free(symbol);
-    return lib.lookup(T, symbol) orelse return error.MissingSymbol;
-}
-
-/// Reads a JSON manifest of the form
-///
-/// ```json
-/// { "modules": [ "engine", "render", "audio" ] }
-/// ```
-///
-/// Every string inside `"modules"` is passed to `loadModule`.
-/// Duplicates are ignored.
-fn loadManifest(
+/// Return a pointer to `T` exported from `lib` under `fmt.format(mod_name)`.
+fn findSymbol(
+    comptime T: type,
+    lib: *std.DynLib,
     allocator: std.mem.Allocator,
-    path: []const u8,
-    bank: *ModuleBank,
-) !void {
+    comptime f: []const u8,
+    mod_name: []const u8,
+) error{ MissingSymbol, OutOfMemory }!T {
+    const sym = try std.fmt.allocPrintZ(allocator, f, .{mod_name});
+    defer allocator.free(sym);
+    return lib.lookup(T, sym) orelse return error.MissingSymbol;
+}
+
+/// Load `"modules"` array from a JSON manifest and invoke `loadModule`
+/// for each entry.  Duplicate names are ignored.
+fn loadManifest(allocator: std.mem.Allocator, path: []const u8, bank: *ModuleBank) !void {
     var file = std.fs.cwd().openFile(path, .{}) catch |e|
         switch (e) {
             error.FileNotFound => return,
@@ -134,7 +140,8 @@ fn loadManifest(
         };
     defer file.close();
 
-    const buf = try file.readToEndAlloc(allocator, 1 * 1024 * 1024);
+    const max_json = 1 * 1024 * 1024;
+    const buf = try file.readToEndAlloc(allocator, max_json);
     defer allocator.free(buf);
 
     const Manifest = struct { modules: []const []const u8 = &.{} };
@@ -142,25 +149,36 @@ fn loadManifest(
     defer parsed.deinit();
 
     for (parsed.value.modules) |name| {
-        if (bank.contains(name)) continue;
+        if (bank.contains(name) or !isValidName(name)) continue;
         try loadModule(bank, name);
     }
 }
-/// Dynamically loads `mod`, runs `<mod>_init`, and stores the handle.
-fn loadModule(bank: *ModuleBank, mod: []const u8) !void {
-    const lib_path = try makeLibraryPath(bank.allocator.*, mod);
-    defer bank.allocator.free(lib_path);
 
-    std.log.info("opening library for module '{s}' -> {s}", .{ mod, lib_path });
+/// `false` if name contains directory separators or `".."`.
+fn isValidName(name: []const u8) bool {
+    return !(std.mem.containsAtLeast(u8, name, 1, "/") or
+        std.mem.containsAtLeast(u8, name, 1, "\\") or
+        std.mem.eql(u8, name, ".."));
+}
 
-    var lib = try std.DynLib.open(lib_path);
+/// Dynamically load, version-check, call `<mod>_init`, then persist in `bank`.
+fn loadModule(bank: *ModuleBank, mod_name: []const u8) !void {
+    const path = try makeLibraryPath(bank.alloc.*, mod_name);
+    defer bank.alloc.free(path);
+
+    std.log.info("opening '{s}' -> {s}", .{ mod_name, path });
+
+    var lib = try std.DynLib.open(path);
     errdefer lib.close();
 
-    const init = try findSymbol(init_fn, &lib, bank.allocator.*, "{s}_init", mod);
-    const deinit = try findSymbol(deinit_fn, &lib, bank.allocator.*, "{s}_deinit", mod);
+    const abi_ptr = try findSymbol(*const u32, &lib, bank.alloc.*, "{s}_abi", mod_name);
+    if (abi_ptr.* != engine_abi_version) return error.IncompatibleModule;
 
-    init(@constCast(bank.allocator));
-    errdefer deinit();
+    const init = try findSymbol(InitFn, &lib, bank.alloc.*, "{s}_init", mod_name);
+    const dein = try findSymbol(DeinitFn, &lib, bank.alloc.*, "{s}_deinit", mod_name);
 
-    try bank.append(lib, deinit, mod);
+    init(@constCast(bank.alloc));
+    errdefer dein();
+
+    try bank.append(lib, dein, mod_name); // ownership moves to bank
 }
