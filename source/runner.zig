@@ -13,6 +13,11 @@ pub const InitFn = *const fn (*std.mem.Allocator) callconv(.C) void;
 /// Pointer to module de-initializer exported as `<name>_deinit`.
 pub const DeinitFn = *const fn () callconv(.C) void;
 
+/// Pointer to a frame-update routine exported as `<name>_update`.
+/// Optional.
+pub const UpdateFn = *const fn (f64) callconv(.C) void;
+fn noUpdate(_: f64) callconv(.C) void {}
+
 pub fn main() !void {
     if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding)
         @compileError("Dynamic modules are not supported on this target.");
@@ -24,6 +29,15 @@ pub fn main() !void {
     defer bank.deinit() catch unreachable;
 
     try loadManifest(arena.allocator(), "modules.json", &bank);
+
+    var last = std.time.nanoTimestamp();
+    while (true) {
+        const now = std.time.nanoTimestamp();
+        const dt = @as(f64, @floatFromInt(now - last)) / 1e9;
+        last = now;
+
+        bank.updateAll(dt);
+    }
 }
 
 /// Contiguous store that tracks every live module.
@@ -34,6 +48,8 @@ const ModuleBank = struct {
     libs: [max_modules]std.DynLib = undefined,
     /// Corresponding `*_deinit` pointers.
     dein: [max_modules]DeinitFn = undefined,
+    /// Optional `*_update` pointers.
+    update: [max_modules]UpdateFn = undefined,
     /// Offset of zero-terminated name inside `blob`.
     offs: [max_modules]u32 = undefined,
     /// Active slot count.
@@ -68,8 +84,12 @@ const ModuleBank = struct {
         return false;
     }
 
+    pub fn updateAll(self: *ModuleBank, delta: f64) void {
+        for (0..@intCast(self.cnt)) |i| self.update[i](delta);
+    }
+
     /// Append a module to the bank.
-    pub fn append(self: *ModuleBank, lib: std.DynLib, dein: DeinitFn, name: []const u8) Error!void {
+    pub fn append(self: *ModuleBank, lib: std.DynLib, dein: DeinitFn, update: UpdateFn, name: []const u8) Error!void {
         if (self.cnt == max_modules) return error.TooManyModules;
 
         const off = @as(u32, @intCast(self.blob.items.len));
@@ -79,6 +99,7 @@ const ModuleBank = struct {
         const idx = self.cnt;
         self.libs[idx] = lib;
         self.dein[idx] = dein;
+        self.update[idx] = update;
         self.offs[idx] = off;
         self.cnt += 1;
     }
@@ -130,6 +151,19 @@ fn findSymbol(
     return lib.lookup(T, sym) orelse return error.MissingSymbol;
 }
 
+/// Same as `findSymbol`, but returns `null` if not found instead of an error.
+fn findSymbolOpt(
+    comptime T: type,
+    lib: *std.DynLib,
+    allocator: std.mem.Allocator,
+    comptime f: []const u8,
+    mod_name: []const u8,
+) !?T {
+    const sym = try std.fmt.allocPrintZ(allocator, f, .{mod_name});
+    defer allocator.free(sym);
+    return lib.lookup(T, sym);
+}
+
 /// Load `"modules"` array from a JSON manifest and invoke `loadModule`
 /// for each entry.  Duplicate names are ignored.
 fn loadManifest(allocator: std.mem.Allocator, path: []const u8, bank: *ModuleBank) !void {
@@ -176,9 +210,10 @@ fn loadModule(bank: *ModuleBank, mod_name: []const u8) !void {
 
     const init = try findSymbol(InitFn, &lib, bank.alloc.*, "{s}_init", mod_name);
     const dein = try findSymbol(DeinitFn, &lib, bank.alloc.*, "{s}_deinit", mod_name);
+    const upd = try findSymbolOpt(UpdateFn, &lib, bank.alloc.*, "{s}_update", mod_name) orelse noUpdate;
 
     init(@constCast(bank.alloc));
     errdefer dein();
 
-    try bank.append(lib, dein, mod_name); // ownership moves to bank
+    try bank.append(lib, dein, upd, mod_name); // ownership moves to bank
 }

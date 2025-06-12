@@ -1,9 +1,11 @@
 const std = @import("std");
 
+pub const windowing = @import("windowing/window.zig");
+
 export const engine_abi: u32 = 1;
 
-export fn engine_init(alloc: *std.mem.Allocator) callconv(.C) void {
-    _ = alloc;
+export fn engine_init(allocator: *std.mem.Allocator) callconv(.C) void {
+    _ = allocator;
     std.debug.print("(engine) module_init\n", .{});
 }
 
