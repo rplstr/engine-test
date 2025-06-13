@@ -1,5 +1,4 @@
 //! X11 backend for the windowing sub-module.
-
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
     @cInclude("X11/Xutil.h");

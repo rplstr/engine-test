@@ -11,13 +11,16 @@ pub const WDescription = extern struct {
 };
 
 /// Enumeration of every event we can currently emit.
-pub const WEventKind = enum(u8) { none, close };
+pub const WEventKind = enum(u8) {
+    none,
+    close,
+};
 
 /// Description of a single event.
 pub const WEvent = extern struct {
     /// What happened. (see `WEventKind`)
     kind: WEventKind,
-    /// Extra numeric payload.
+    /// Extra numeric payload (keycode / button id / etc.).
     code: u32,
 };
 

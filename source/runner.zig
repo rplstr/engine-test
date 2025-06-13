@@ -138,7 +138,8 @@ fn makeLibraryPath(allocator: std.mem.Allocator, mod_name: []const u8) ![]u8 {
     defer allocator.free(dir);
     const file = try makeSharedName(allocator, mod_name);
     defer allocator.free(file);
-    return std.fs.path.join(allocator, &.{ dir, file });
+    // We have all the dlls in bin.
+    return std.fs.path.join(allocator, &.{ dir, "bin", file });
 }
 
 /// Return a pointer to `T` exported from `lib` under `fmt.format(mod_name)`.
