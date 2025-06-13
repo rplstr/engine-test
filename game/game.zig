@@ -22,7 +22,7 @@ export fn game_init(allocator: *std.mem.Allocator) callconv(.c) void {
 export fn game_update(dt: f64) callconv(.c) bool {
     if (g_handle == 0) return false;
 
-    var ev: engine.windowing.WEvent = .{ .kind = .none, .code = 0, .delta_x = 0, .delta_y = 0 };
+    var ev: engine.windowing.WEvent = .{ .kind = .none, .code = 0 };
     while (engine.windowing.w_poll(&ev)) switch (ev.kind) {
         .close => {
             engine.windowing.w_close_window(g_handle);

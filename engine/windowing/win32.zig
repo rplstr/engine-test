@@ -73,7 +73,7 @@ pub fn poll(out: *WEvent) bool {
 
     switch (msg.message) {
         windows.WM_CLOSE, windows.WM_QUIT => {
-            out.* = .{ .kind = .close, .code = 0, .delta_x = 0, .delta_y = 0 };
+            out.* = .{ .kind = .close, .code = 0 };
             return true;
         },
         else => {
