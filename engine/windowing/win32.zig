@@ -6,8 +6,8 @@ const windows = @cImport(@cInclude("windows.h"));
 const WDescription = @import("window.zig").WDescription;
 const WEvent = @import("window.zig").WEvent;
 
-const wnd_class: [*:0]const u8 = @ptrCast("wnd");
-const def_title: [*:0]const u8 = @ptrCast("zig");
+const wnd_class: [*:0]const u8 = "wnd";
+const def_title: [*:0]const u8 = "zig";
 
 export fn wndProc(handle: windows.HWND, msg: windows.UINT, wparam: windows.WPARAM, lparam: windows.LPARAM) callconv(.c) windows.LRESULT {
     if (msg == windows.WM_DESTROY) {
