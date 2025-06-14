@@ -34,8 +34,25 @@ pub fn module(
     }
 
     switch (target.result.os.tag) {
-        .windows => lib.linkSystemLibrary("user32"),
-        .linux => lib.linkSystemLibrary("X11"),
+        .windows => {
+            lib.linkSystemLibrary("user32");
+        },
+        .linux => {
+            lib.linkSystemLibrary("X11");
+
+            const wayland_xml = waylandXmlPath(b);
+            const wayland_includes = b.addNamedWriteFiles("wayland-includes");
+            _ = wayland_includes.addCopyFile(
+                generateClientHeader(b, wayland_xml),
+                "wayland.h",
+            );
+
+            lib.addIncludePath(wayland_includes.getDirectory());
+            lib.addCSourceFile(.{
+                .file = generateClientSource(b, wayland_xml),
+                .language = .c,
+            });
+        },
         else => {},
     }
 
@@ -50,4 +67,39 @@ pub fn module(
     }
 
     return lib;
+}
+
+fn waylandXmlPath(b: *std.Build) []const u8 {
+    const pkg_data_dir = b.run(&.{
+        "pkg-config",
+        "--variable=pkgdatadir",
+        "wayland-scanner",
+    });
+
+    return b.pathJoin(&.{
+        std.mem.trim(u8, pkg_data_dir, std.ascii.whitespace[0..]),
+        "wayland.xml",
+    });
+}
+
+fn generateClientHeader(b: *std.Build, protocol_xml_path: []const u8) std.Build.LazyPath {
+    return invokeWaylandScanner(b, "client-header", protocol_xml_path, "wayland.h");
+}
+
+fn generateClientSource(b: *std.Build, protocol_xml_path: []const u8) std.Build.LazyPath {
+    return invokeWaylandScanner(b, "private-code", protocol_xml_path, "wayland.c");
+}
+
+fn invokeWaylandScanner(
+    b: *std.Build,
+    operation: []const u8,
+    input_path: []const u8,
+    output_basename: []const u8,
+) std.Build.LazyPath {
+    const s = b.addSystemCommand(&.{
+        "wayland-scanner",
+        operation,
+        input_path,
+    });
+    return s.addOutputFileArg(output_basename);
 }
