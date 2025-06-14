@@ -27,7 +27,7 @@ pub const WEvent = extern struct {
 const Backend = switch (builtin.os.tag) {
     .windows => @import("win32.zig"),
     // TODO: wayland, cocoa
-    else => @import("x11.zig"),
+    else => @import("wayland.zig"),
 };
 
 /// Creates and shows a native window.
