@@ -31,6 +31,7 @@
 
             wayland
             wayland-scanner
+            wayland-protocols
           ];
 
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}";
