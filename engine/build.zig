@@ -31,7 +31,10 @@ pub fn module(
     }
 
     if (!static) {
-        const inst = b.addInstallArtifact(lib, .{ .dest_sub_path = b.fmt("bin/{s}", .{lib.out_filename}) });
+        const inst = b.addInstallArtifact(lib, .{
+            .dest_dir = .{ .override = .bin },
+            .dest_sub_path = b.fmt("bin/{s}", .{lib.out_filename}),
+        });
         b.getInstallStep().dependOn(&inst.step);
     }
 
