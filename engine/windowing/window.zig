@@ -96,27 +96,17 @@ pub fn backendCall(comptime T: type, comptime function_name: []const u8, args: a
     }
 }
 
-// FIXME: remove this and use engine_init to call init
-// instead once the dll dispatching problem is solved
-fn lazyInit() void {
-    init(std.heap.c_allocator);
-}
-var lazyInitOnce = std.once(lazyInit);
-
 /// Creates and shows a native window.
 pub export fn w_open_window(description: *const WDescription) callconv(.c) u64 {
-    lazyInitOnce.call();
     return backendCall(u64, "openWindow", .{description.*});
 }
 
 /// Non-blocking. Returns `true` if an event for `handle` was placed in `out`.
 pub export fn w_poll(out: *WEvent) callconv(.c) bool {
-    lazyInitOnce.call();
     return backendCall(bool, "poll", .{out});
 }
 
 /// Destroys a window previously created by `w_open_window`.
 pub export fn w_close_window(handle: u64) callconv(.c) void {
-    lazyInitOnce.call();
     return backendCall(void, "closeWindow", .{handle});
 }

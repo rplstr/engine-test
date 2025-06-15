@@ -14,13 +14,12 @@ export fn engine_init(
     allocator: *std.mem.Allocator,
     dispatcher: *const fn (func: [*c]const u8) callconv(.c) ?*const anyopaque,
 ) callconv(.c) void {
-    _ = allocator;
     std.debug.print("(engine) module_init\n", .{});
 
     findPfn = @ptrCast(dispatcher);
     installPfn = @ptrCast(findPfn("installPfn").?);
 
-    // windowing.init(allocator.*);
+    windowing.init(allocator.*);
 
     _ = installPfn("w_open_window", &windowing.w_open_window);
     _ = installPfn("w_poll", &windowing.w_poll);
