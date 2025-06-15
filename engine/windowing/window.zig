@@ -1,3 +1,4 @@
+const std = @import("std");
 const builtin = @import("builtin");
 
 /// Immutable compile-time description of a window.
@@ -24,23 +25,93 @@ pub const WEvent = extern struct {
     code: u32,
 };
 
-const Backend = switch (builtin.os.tag) {
-    .windows => @import("win32.zig"),
-    // TODO: wayland, cocoa
-    else => @import("wayland.zig"),
+const backends = switch (builtin.os.tag) {
+    .windows => struct {
+        const win32 = @import("win32.zig");
+    },
+    else => struct {
+        const x11 = @import("x11.zig");
+        const wayland = @import("wayland.zig");
+    },
 };
+
+const Backend = switch (builtin.os.tag) {
+    .windows => union(enum) {
+        uninitialized: void,
+        win32: void,
+    },
+    else => union(enum) {
+        uninitialized: void,
+        x11: void,
+        wayland: *backends.wayland.WlConn,
+    },
+};
+
+var backend: Backend = .{ .uninitialized = {} };
+
+pub fn init(allocator: std.mem.Allocator) void {
+    // std.debug.dumpCurrentStackTrace(null);
+    // defer _ = @atomicLoad(u8, @as(*u8, @ptrCast(&backend)), .seq_cst);
+    defer std.log.debug("picked windowing backend: {s}", .{
+        @tagName(backend),
+    });
+
+    switch (builtin.os.tag) {
+        .windows => {
+            backend = .{ .win32 = {} };
+        },
+        else => {
+            if (backends.wayland.WlConn.init(allocator)) |wl_conn| {
+                backend = .{ .wayland = wl_conn };
+                return;
+            } else |err| {
+                std.log.debug("wayland connection failed: {}, using fallback windowing system", .{err});
+            }
+
+            backend = .{ .x11 = {} };
+        },
+    }
+}
+
+pub fn backendCall(comptime T: type, comptime function_name: []const u8, args: anytype) T {
+    // std.debug.dumpCurrentStackTrace(null);
+    // _ = @atomicLoad(u8, @as(*u8, @ptrCast(&backend)), .seq_cst);
+    switch (std.meta.activeTag(backend)) {
+        inline else => |tag| {
+            std.log.info("windowing backend: {s}", .{@tagName(tag)});
+
+            if (tag == .uninitialized) unreachable;
+
+            const active_backend = @field(backends, @tagName(tag));
+            const state = @field(backend, @tagName(tag));
+            const func = @field(active_backend, function_name);
+
+            return @call(.auto, func, .{state} ++ args);
+        },
+    }
+}
+
+// FIXME: remove this and use engine_init to call init
+// instead once the dll dispatching problem is solved
+fn lazyInit() void {
+    init(std.heap.c_allocator);
+}
+var lazyInitOnce = std.once(lazyInit);
 
 /// Creates and shows a native window.
 pub export fn w_open_window(description: *const WDescription) callconv(.c) u64 {
-    return Backend.openWindow(description.*);
+    lazyInitOnce.call();
+    return backendCall(u64, "openWindow", .{description.*});
 }
 
 /// Non-blocking. Returns `true` if an event for `handle` was placed in `out`.
 pub export fn w_poll(out: *WEvent) callconv(.c) bool {
-    return Backend.poll(out);
+    lazyInitOnce.call();
+    return backendCall(bool, "poll", .{out});
 }
 
 /// Destroys a window previously created by `w_open_window`.
 pub export fn w_close_window(handle: u64) callconv(.c) void {
-    Backend.closeWindow(handle);
+    lazyInitOnce.call();
+    return backendCall(void, "closeWindow", .{handle});
 }
