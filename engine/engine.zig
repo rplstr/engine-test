@@ -7,6 +7,7 @@ export const engine_abi: u32 = 1;
 
 export fn engine_init(allocator: *std.mem.Allocator) callconv(.c) void {
     _ = allocator;
+    // windowing.init(allocator.*);
     std.debug.print("(engine) module_init\n", .{});
 }
 
