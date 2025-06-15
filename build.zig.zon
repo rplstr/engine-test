@@ -1,8 +1,18 @@
 .{
     .name = .eng,
     .version = "1.0.0",
+    .dependencies = .{
+        .vulkan = .{
+            .url = "git+https://github.com/Snektron/vulkan-zig.git#c66bddee009a8c4b71082ab7af723ed885161650",
+            .hash = "vulkan-0.0.0-r7YtxwZVAwDbCFXX5GpnS436SfBec9INY0zq-2OQ2BUp",
+        },
+        .vulkan_headers = .{
+            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/v1.3.283.tar.gz",
+            .hash = "N-V-__8AAAkkoQGn5z1yoNVrwqZfnYmZp8AZ5CJgoHRMQI0c",
+        },
+    },
 
-    .fingerprint = 0x99f5620b612961df,  // Do not change.
+    .fingerprint = 0x99f5620b612961df, // Do not change.
 
     .minimum_zig_version = "0.14.0",
 
@@ -11,6 +21,6 @@
         "build.zig.zon",
         "source",
         "game",
-        "engine"
+        "engine",
     },
 }

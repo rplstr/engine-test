@@ -6,8 +6,10 @@ pub fn build(b: *std.Build) void {
 
     // Modules.
     // TODO: we can probably do some comptime stuff to detect these automatically?
-    const engine = @import("engine/build.zig").module(b, target, optimize);
-    const game = @import("game/build.zig").module(b, target, optimize, engine);
+    const vulkan = @import("vulkan/build.zig").module(b, target, optimize);
+
+    const engine = @import("engine/build.zig").module(b, target, optimize, vulkan);
+    const game = @import("game/build.zig").module(b, target, optimize, engine, vulkan);
 
     // Runner.
     const exe = b.addExecutable(.{
@@ -17,6 +19,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
     exe.linkLibC();
+    exe.linkLibrary(vulkan);
+
+    switch (target.result.os.tag) {
+        .windows => exe.linkSystemLibrary("vulkan-1"),
+        .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .haiku, .solaris => exe.linkSystemLibrary("vulkan"),
+        else => {},
+    }
 
     if (exe.rootModuleTarget().os.tag == .wasi or exe.rootModuleTarget().os.tag == .freestanding) {
         exe.linkLibrary(engine);

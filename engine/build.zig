@@ -4,6 +4,7 @@ pub fn module(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    vulkan: *std.Build.Step.Compile,
 ) *std.Build.Step.Compile {
     const static = switch (target.result.os.tag) {
         .wasi, .freestanding => true,
@@ -15,6 +16,7 @@ pub fn module(
         .target = target,
         .optimize = optimize,
     });
+    root.addImport("vulkan", vulkan.root_module);
 
     const lib = b.addLibrary(.{
         .name = "engine",

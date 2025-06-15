@@ -4,7 +4,8 @@ pub fn module(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    engine_lib: *std.Build.Step.Compile,
+    engine: *std.Build.Step.Compile,
+    vulkan: *std.Build.Step.Compile,
 ) *std.Build.Step.Compile {
     const static = switch (target.result.os.tag) {
         .wasi, .freestanding => true,
@@ -16,7 +17,8 @@ pub fn module(
         .target = target,
         .optimize = optimize,
     });
-    root.addImport("engine", engine_lib.root_module);
+    root.addImport("engine", engine.root_module);
+    root.addImport("vulkan", vulkan.root_module);
 
     const lib = b.addLibrary(.{
         .name = "game",
@@ -24,7 +26,7 @@ pub fn module(
         .linkage = if (static) .static else .dynamic,
         .version = .{ .major = 1, .minor = 0, .patch = 0 },
     });
-    lib.linkLibrary(engine_lib);
+    lib.linkLibrary(engine);
     lib.linkLibC();
     if (!static) {
         const inst = b.addInstallArtifact(lib, .{
