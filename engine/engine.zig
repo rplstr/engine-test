@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const windowing = @import("windowing/window.zig");
+pub const vulkan = @import("rendering/vulkan.zig");
 
 export const engine_abi: u32 = 1;
 

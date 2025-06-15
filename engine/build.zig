@@ -26,11 +26,20 @@ pub fn module(
     });
     lib.linkLibC();
 
+    // Vulkan.
+    switch (target.result.os.tag) {
+        .windows => lib.linkSystemLibrary("vulkan-1"),
+        .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .haiku, .solaris => lib.linkSystemLibrary("vulkan"),
+        else => {},
+    }
+
     switch (target.result.os.tag) {
         .windows => lib.linkSystemLibrary("user32"),
         .linux => lib.linkSystemLibrary("X11"),
         else => {},
     }
+
+    lib.addRPath(.{ .cwd_relative = "$ORIGIN" });
 
     if (!static) {
         const inst = b.addInstallArtifact(lib, .{
