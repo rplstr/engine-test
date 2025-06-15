@@ -28,7 +28,6 @@ pub fn module(
     });
     lib.linkLibrary(engine);
     lib.linkLibC();
-    lib.addRPath(.{ .cwd_relative = "$ORIGIN" });
     if (!static) {
         const inst = b.addInstallArtifact(lib, .{
             .dest_dir = .{ .override = .bin },

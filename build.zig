@@ -21,12 +21,6 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     exe.linkLibrary(vulkan);
 
-    switch (target.result.os.tag) {
-        .windows => exe.linkSystemLibrary("vulkan-1"),
-        .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .haiku, .solaris => exe.linkSystemLibrary("vulkan"),
-        else => {},
-    }
-
     if (exe.rootModuleTarget().os.tag == .wasi or exe.rootModuleTarget().os.tag == .freestanding) {
         exe.linkLibrary(engine);
         exe.linkLibrary(game);

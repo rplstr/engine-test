@@ -1,34 +1,64 @@
 const vulkan = @import("vulkan");
-
-/// Extern symbol exported by the Vulkan loader.
-pub const vkGetInstanceProcAddr = @extern(vulkan.PfnGetInstanceProcAddr, .{
-    .name = "vkGetInstanceProcAddr",
-    .library_name = "vulkan",
-});
+const loader = @import("vulkan/loader.zig");
 
 pub const instance = @import("vulkan/instance.zig");
 pub const IDescription = instance.IDescription;
-pub const IContext = instance.IContext;
+pub const IInstance = instance.IInstance;
+
+pub const physical_device = @import("vulkan/physical_device.zig");
+pub const DDevice = physical_device.DDevice;
+pub const DQueueFamilies = physical_device.DQueueFamilies;
 
 /// Create a Vulkan instance.
 /// Returns 0 on success or a negative error code.
 ///
 /// C ABI. If calling from Zig, prefer `instance.createInstance`.
-pub export fn rendering_vulkan_create_instance(
+pub export fn rendering_vulkan_instance_init(
     settings: *const IDescription,
     extensions: [*c]const [*:0]const u8,
     extension_count: usize,
     layers: [*c]const [*:0]const u8,
     layer_count: usize,
-    out_ctx: *IContext,
-) callconv(.C) void {
-    const result = instance.createInstanceRuntime(vkGetInstanceProcAddr, settings.*, extensions, extension_count, layers, layer_count) catch return;
+    out_ctx: *IInstance,
+) callconv(.C) c_int {
+    const getInstanceProcAddrFn = getInstanceProcAddr() catch |err| {
+        return -@as(c_int, @intCast(@intFromError(err)));
+    };
+
+    const result = instance.initRuntime(getInstanceProcAddrFn, settings.*, extensions, extension_count, layers, layer_count) catch |err| {
+        return -@as(c_int, @intCast(@intFromError(err)));
+    };
     out_ctx.* = result;
+    return 0;
 }
 
 /// Destroy an instance.
 ///
 /// C ABI. If calling from Zig, prefer `instance.IContext.destroy`.
-pub export fn rendering_vulkan_destroy_instance(ctx: *IContext) callconv(.C) void {
-    ctx.*.destroy();
+pub export fn rendering_vulkan_instance_deinit(ctx: *IInstance) callconv(.C) void {
+    ctx.*.deinit();
+}
+
+/// Select the most suitable physical device and fill out DeviceContext.
+/// Returns 0 on success, a negative error code otherwise.
+///
+/// C ABI. If calling from Zig, prefer `physical_device.DeviceContext.init`.
+pub export fn rendering_vulkan_physical_device_init(
+    ctx: *const IInstance,
+    surface: ?*const vulkan.SurfaceKHR,
+    out_dev: *DDevice,
+) callconv(.C) c_int {
+    const maybe_surface = if (surface) |s| s.* else null;
+    const res = physical_device.init(ctx.*.proxy, maybe_surface) catch |err| {
+        return -@as(c_int, @intCast(@intFromError(err)));
+    };
+    out_dev.* = res;
+    return 0;
+}
+
+/// Returns a pointer to `vkGetInstanceProcAddr` exported by the Vulkan loader.
+pub fn getInstanceProcAddr() !vulkan.PfnGetInstanceProcAddr {
+    try loader.init();
+    const instanceProcAddr = try loader.get();
+    return instanceProcAddr.fn_ptr;
 }

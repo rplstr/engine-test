@@ -123,12 +123,10 @@ const ModuleBank = struct {
 /// "engine" => "engine.dylib" (macOS)
 /// ```
 fn makeSharedName(allocator: std.mem.Allocator, mod_name: []const u8) ![]u8 {
-    const suffix = switch (builtin.os.tag) {
-        .windows => ".dll",
-        .macos => ".dylib",
-        else => ".so",
-    };
-    const prefix = if (builtin.os.tag == .windows) "" else "lib";
+    const os_tag = builtin.target.os.tag;
+    const abi = builtin.target.abi;
+    const suffix = std.Target.Os.Tag.dynamicLibSuffix(os_tag);
+    const prefix = std.Target.Os.Tag.libPrefix(os_tag, abi);
     return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ prefix, mod_name, suffix });
 }
 

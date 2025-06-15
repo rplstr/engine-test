@@ -25,21 +25,13 @@ pub fn module(
         .version = .{ .major = 1, .minor = 0, .patch = 0 },
     });
     lib.linkLibC();
-
-    // Vulkan.
-    switch (target.result.os.tag) {
-        .windows => lib.linkSystemLibrary("vulkan-1"),
-        .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .haiku, .solaris => lib.linkSystemLibrary("vulkan"),
-        else => {},
-    }
+    lib.linkLibrary(vulkan);
 
     switch (target.result.os.tag) {
         .windows => lib.linkSystemLibrary("user32"),
-        .linux => lib.linkSystemLibrary("X11"),
+        .linux => lib.linkSystemLibrary("x11"),
         else => {},
     }
-
-    lib.addRPath(.{ .cwd_relative = "$ORIGIN" });
 
     if (!static) {
         const inst = b.addInstallArtifact(lib, .{

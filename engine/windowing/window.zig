@@ -1,7 +1,7 @@
 const builtin = @import("builtin");
 
 /// Immutable compile-time description of a window.
-pub const WDescription = extern struct {
+pub const WDescription = struct {
     /// Client-area width in pixels.
     width: u16,
     /// Client-area height in pixels.
@@ -17,7 +17,7 @@ pub const WEventKind = enum(u8) {
 };
 
 /// Description of a single event.
-pub const WEvent = extern struct {
+pub const WEvent = struct {
     /// What happened. (see `WEventKind`)
     kind: WEventKind,
     /// Extra numeric payload (keycode / button id / etc.).

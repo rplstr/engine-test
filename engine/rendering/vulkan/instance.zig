@@ -11,34 +11,32 @@ pub const IDescription = struct {
 };
 
 /// Opaque handle bundle returned by `createInstance`.
-pub const IContext = struct {
+pub const IInstance = struct {
     instance: vulkan.Instance,
     base: vulkan.BaseWrapper,
     wrapper: vulkan.InstanceWrapper,
     proxy: vulkan.InstanceProxy,
 
     /// Always call this when the instance is no longer required.
-    pub fn destroy(self: IContext) void {
+    pub fn deinit(self: IInstance) void {
         self.proxy.destroyInstance(null);
     }
 };
 
 /// Returns a fully initialised `Context` holding the instance and its
 /// dispatch structures.
-pub fn createInstance(
+pub fn init(
     loader: anytype,
     description: IDescription,
     comptime extensions: []const [:0]const u8,
     comptime layers: []const [:0]const u8,
-) !IContext {
+) !IInstance {
     const vkb = vulkan.BaseWrapper.load(loader);
 
     const ext_names = toPtrArray(extensions);
     const layer_names = toPtrArray(layers);
 
     var app_info = vulkan.ApplicationInfo{
-        .s_type = .application_info,
-        .p_next = null,
         .p_application_name = description.app_name,
         .application_version = @bitCast(description.app_version),
         .p_engine_name = description.engine_name,
@@ -62,7 +60,7 @@ pub fn createInstance(
     const vki = vulkan.InstanceWrapper.load(instance_handle, vkb.dispatch.vkGetInstanceProcAddr.?);
     const proxy = vulkan.InstanceProxy.init(instance_handle, &vki);
 
-    return IContext{
+    return IInstance{
         .instance = instance_handle,
         .base = vkb,
         .wrapper = vki,
@@ -71,14 +69,14 @@ pub fn createInstance(
 }
 
 /// Same as createInstance, but consumes raw C arrays instead of comptime lists.
-pub fn createInstanceRuntime(
+pub fn initRuntime(
     loader: vulkan.PfnGetInstanceProcAddr,
     settings: IDescription,
     ext_names: [*c]const [*:0]const u8,
     ext_cnt: usize,
     layer_names: [*c]const [*:0]const u8,
     layer_cnt: usize,
-) !IContext {
+) !IInstance {
     const vkb = vulkan.BaseWrapper.load(loader);
 
     var app_info = vulkan.ApplicationInfo{
@@ -106,7 +104,7 @@ pub fn createInstanceRuntime(
     const vki = vulkan.InstanceWrapper.load(handle, vkb.dispatch.vkGetInstanceProcAddr.?);
     const proxy = vulkan.InstanceProxy.init(handle, &vki);
 
-    return IContext{ .instance = handle, .base = vkb, .wrapper = vki, .proxy = proxy };
+    return IInstance{ .instance = handle, .base = vkb, .wrapper = vki, .proxy = proxy };
 }
 
 /// Convert a compile-time list of 0-terminated strings into the plain
