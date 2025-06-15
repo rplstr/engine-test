@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const proto = @import("proto");
 
 /// Engine/plug-in ABI version required by this build.
 pub const engine_abi_version = 1;
@@ -24,8 +25,9 @@ pub fn main() !void {
     if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding)
         @compileError("Dynamic modules are not supported on this target.");
 
-    _ = installPfn("findPfn", findPfn);
-    _ = installPfn("installPfn", installPfn);
+    proto.findPfn = findPfn;
+    proto.installPfn = installPfn;
+    proto.installRunner();
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -247,6 +249,8 @@ fn loadModule(bank: *ModuleBank, mod_name: []const u8) !void {
 
     var lib = try std.DynLib.open(path);
     errdefer lib.close();
+
+    std.log.info("opened '{s}'", .{mod_name});
 
     const abi_ptr = try findSymbol(*const u32, &lib, bank.alloc.*, "{s}_abi", mod_name);
     if (abi_ptr.* != engine_abi_version) return error.IncompatibleModule;

@@ -1,5 +1,6 @@
 //! wayland backend for the windowing sub-module.
 const std = @import("std");
+const proto = @import("proto");
 const c = @cImport({
     @cInclude("wayland.h");
     @cInclude("xdg-shell.h");
@@ -7,8 +8,8 @@ const c = @cImport({
 const x11 = @import("x11.zig");
 
 const log = std.log.scoped(.wayland);
-const WEvent = @import("window.zig").WEvent;
-const WDescription = @import("window.zig").WDescription;
+const WEvent = proto.WEvent;
+const WDescription = proto.WDescription;
 pub const WlConn = @import("wayland/WlConn.zig");
 pub const WlWindow = @import("wayland/WlWindow.zig");
 

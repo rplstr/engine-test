@@ -4,19 +4,23 @@ pub fn module(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    vulkan: *std.Build.Step.Compile,
+    proto: *std.Build.Module,
 ) *std.Build.Step.Compile {
     const static = switch (target.result.os.tag) {
         .wasi, .freestanding => true,
         else => false,
     };
 
+    const vulkan = @import("../vulkan/build.zig")
+        .module(b, target, optimize);
+
     const root = b.addModule("engine", .{
         .root_source_file = b.path("engine/engine.zig"),
         .target = target,
         .optimize = optimize,
     });
-    root.addImport("vulkan", vulkan.root_module);
+    root.addImport("proto", proto);
+    root.addImport("vulkan", vulkan);
 
     const lib = b.addLibrary(.{
         .name = "engine",
@@ -25,13 +29,6 @@ pub fn module(
         .version = .{ .major = 1, .minor = 0, .patch = 0 },
     });
     lib.linkLibC();
-
-    // Vulkan.
-    switch (target.result.os.tag) {
-        .windows => lib.linkSystemLibrary("vulkan-1"),
-        .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .haiku, .solaris => lib.linkSystemLibrary("vulkan"),
-        else => {},
-    }
 
     switch (target.result.os.tag) {
         .windows => {

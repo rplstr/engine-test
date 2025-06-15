@@ -1,29 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const proto = @import("proto");
 
-/// Immutable compile-time description of a window.
-pub const WDescription = extern struct {
-    /// Client-area width in pixels.
-    width: u16,
-    /// Client-area height in pixels.
-    height: u16,
-    /// Optional UTF-8 NUL-terminated title of the window.
-    title: ?[*:0]const u8,
-};
-
-/// Enumeration of every event we can currently emit.
-pub const WEventKind = enum(u8) {
-    none,
-    close,
-};
-
-/// Description of a single event.
-pub const WEvent = extern struct {
-    /// What happened. (see `WEventKind`)
-    kind: WEventKind,
-    /// Extra numeric payload (keycode / button id / etc.).
-    code: u32,
-};
+//
 
 const backends = switch (builtin.os.tag) {
     .windows => struct {
@@ -97,12 +76,12 @@ pub fn backendCall(comptime T: type, comptime function_name: []const u8, args: a
 }
 
 /// Creates and shows a native window.
-pub export fn w_open_window(description: *const WDescription) callconv(.c) u64 {
+pub export fn w_open_window(description: *const proto.WDescription) callconv(.c) u64 {
     return backendCall(u64, "openWindow", .{description.*});
 }
 
 /// Non-blocking. Returns `true` if an event for `handle` was placed in `out`.
-pub export fn w_poll(out: *WEvent) callconv(.c) bool {
+pub export fn w_poll(out: *proto.WEvent) callconv(.c) bool {
     return backendCall(bool, "poll", .{out});
 }
 

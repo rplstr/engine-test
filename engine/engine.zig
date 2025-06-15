@@ -1,35 +1,38 @@
 const std = @import("std");
+const proto = @import("proto");
+const vk = @import("vulkan");
 
 pub const windowing = @import("windowing/window.zig");
 pub const vulkan = @import("rendering/vulkan.zig");
 
 export const engine_abi: u32 = 1;
 
-var installPfn: *const fn (func: [*c]const u8, pfn: *const anyopaque) callconv(.c) bool = undefined;
-var findPfn: *const fn (func: [*c]const u8) callconv(.c) ?*const anyopaque = undefined;
-
 var vulkan_instance: ?vulkan.IContext = null;
 
 export fn engine_init(
     allocator: *std.mem.Allocator,
-    dispatcher: *const fn (func: [*c]const u8) callconv(.c) ?*const anyopaque,
+    findPfn: proto.PfnFindPfn,
 ) callconv(.c) void {
     std.debug.print("(engine) module_init\n", .{});
 
-    findPfn = @ptrCast(dispatcher);
-    installPfn = @ptrCast(findPfn("installPfn").?);
+    proto.loadRunner(findPfn) catch |err| {
+        std.log.err("failed to load runner: {}", .{err});
+        return;
+    };
+    proto.w_open_window = windowing.w_open_window;
+    proto.w_poll = windowing.w_poll;
+    proto.w_close_window = windowing.w_close_window;
+    proto.installEngine();
 
     windowing.init(allocator.*);
 
-    _ = installPfn("w_open_window", &windowing.w_open_window);
-    _ = installPfn("w_poll", &windowing.w_poll);
-    _ = installPfn("w_close_window", &windowing.w_close_window);
-
     // VULKAN
     // INSTANCE
+    var vulkan_dl = std.DynLib.open("libvulkan.so") catch unreachable;
+    const vkGetInstanceProcAddr = vulkan_dl.lookup(vk.PfnGetInstanceProcAddr, "vkGetInstanceProcAddr").?;
     const desc = vulkan.IDescription{};
     const ctx_res = vulkan.instance.createInstance(
-        vulkan.vkGetInstanceProcAddr,
+        vkGetInstanceProcAddr,
         desc,
         &[_][:0]const u8{},
         &[_][:0]const u8{},
