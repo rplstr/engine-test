@@ -1,16 +1,17 @@
 //! X11 backend for the windowing sub-module.
+const proto = @import("proto");
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
     @cInclude("X11/Xutil.h");
 });
-const WEvent = @import("window.zig").WEvent;
-const WDescription = @import("window.zig").WDescription;
+const WEvent = proto.WEvent;
+const WDescription = proto.WDescription;
 
 var display: ?*x11.Display = null;
 var wm_delete: x11.Atom = 0;
 
 /// Do not invoke directly; use `w_open_window` instead.
-pub fn openWindow(description: WDescription) u64 {
+pub fn openWindow(_: void, description: WDescription) u64 {
     if (display == null) {
         display = x11.XOpenDisplay(null) orelse return 0;
     }
@@ -44,7 +45,7 @@ pub fn openWindow(description: WDescription) u64 {
 }
 
 /// Do not invoke directly; use `w_poll` instead.
-pub fn poll(out: *WEvent) bool {
+pub fn poll(_: void, out: *WEvent) bool {
     const d = display orelse return false;
 
     if (x11.XPending(d) == 0) {
@@ -69,7 +70,7 @@ pub fn poll(out: *WEvent) bool {
 }
 
 /// Do not invoke directly; use `w_close_window` instead.
-pub fn closeWindow(handle: u64) void {
+pub fn closeWindow(_: void, handle: u64) void {
     if (handle == 0 or display == null) return;
     const d = display.?;
     _ = x11.XDestroyWindow(d, @intCast(handle));
