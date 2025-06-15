@@ -78,13 +78,18 @@ pub fn backendCall(comptime T: type, comptime function_name: []const u8, args: a
     // _ = @atomicLoad(u8, @as(*u8, @ptrCast(&backend)), .seq_cst);
     switch (std.meta.activeTag(backend)) {
         inline else => |tag| {
-            std.log.info("windowing backend: {s}", .{@tagName(tag)});
+            // std.log.debug("windowing backend: {s}", .{@tagName(tag)});
 
             if (tag == .uninitialized) unreachable;
 
             const active_backend = @field(backends, @tagName(tag));
             const state = @field(backend, @tagName(tag));
             const func = @field(active_backend, function_name);
+
+            // std.log.debug("calling {any} with {any}", .{
+            //     &func,
+            //     .{state} ++ args,
+            // });
 
             return @call(.auto, func, .{state} ++ args);
         },
