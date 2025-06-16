@@ -1,15 +1,15 @@
 const std = @import("std");
+const proto = @import("proto");
 const c = @cImport({
     @cInclude("wayland.h");
     @cInclude("xdg-shell.h");
 });
 
-const common = @import("../window.zig");
 const util = @import("util.zig");
 
 const log = std.log.scoped(.wayland);
-const WEvent = common.WEvent;
-const WDescription = common.WDescription;
+const WEvent = proto.WEvent;
+const WDescription = proto.WDescription;
 const WlConn = @import("../wayland.zig").WlConn;
 
 //

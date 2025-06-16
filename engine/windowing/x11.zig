@@ -1,10 +1,11 @@
 //! X11 backend for the windowing sub-module.
+const proto = @import("proto");
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
     @cInclude("X11/Xutil.h");
 });
-const WEvent = @import("window.zig").WEvent;
-const WDescription = @import("window.zig").WDescription;
+const WEvent = proto.WEvent;
+const WDescription = proto.WDescription;
 
 var display: ?*x11.Display = null;
 var wm_delete: x11.Atom = 0;

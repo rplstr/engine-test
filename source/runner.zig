@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const proto = @import("proto");
 
 /// Engine/plug-in ABI version required by this build.
 pub const engine_abi_version = 1;
@@ -8,7 +9,7 @@ pub const engine_abi_version = 1;
 pub const max_modules = 128;
 
 /// Pointer to module initializer exported as `<name>_init`.
-pub const InitFn = *const fn (*std.mem.Allocator) callconv(.c) void;
+pub const InitFn = *const fn (*std.mem.Allocator, *const anyopaque) callconv(.c) void;
 
 /// Pointer to module de-initializer exported as `<name>_deinit`.
 pub const DeinitFn = *const fn () callconv(.c) void;
@@ -24,6 +25,10 @@ pub fn main() !void {
     if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding)
         @compileError("Dynamic modules are not supported on this target.");
 
+    proto.findPfn = findPfn;
+    proto.installPfn = installPfn;
+    proto.installRunner();
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -35,11 +40,47 @@ pub fn main() !void {
     var last = std.time.nanoTimestamp();
     var dt: f64 = 0;
 
+    std.log.debug("installed pfns:", .{});
+    var it = pfns.iterator();
+    while (it.next()) |ent| {
+        std.log.debug(" - pfn: {s}", .{ent.key_ptr.*});
+    }
+
     while (bank.updateAll(dt)) {
         const now = std.time.nanoTimestamp();
         dt = @as(f64, @floatFromInt(now - last)) / 1e9;
         last = now;
     }
+}
+
+var pfns: std.StringArrayHashMap(*const anyopaque) = .init(std.heap.c_allocator);
+
+fn installPfn(_func: [*c]const u8, pfn: *const anyopaque) callconv(.c) bool {
+    // duplicate the key data, because `pfns` can outlive the borrowed `mod`
+    const func: []const u8 = std.heap.c_allocator.dupe(u8, std.mem.span(_func)) catch |err| {
+        std.log.err("failed to install pfn={s}: {}", .{ std.mem.span(_func), err });
+        return false;
+    };
+
+    const result = pfns.getOrPut(func) catch |err| {
+        std.log.err("failed to install pfn={s}: {}", .{ func, err });
+        std.heap.c_allocator.free(func);
+        return false;
+    };
+
+    if (result.found_existing) {
+        std.log.err("duplicate pfn={s}", .{func});
+        std.heap.c_allocator.free(func);
+        return false;
+    }
+
+    result.value_ptr.* = pfn;
+    return true;
+}
+
+fn findPfn(_func: [*c]const u8) callconv(.c) ?*const anyopaque {
+    const func: []const u8 = std.mem.span(_func);
+    return pfns.get(func);
 }
 
 /// Contiguous store that tracks every live module.
@@ -209,6 +250,8 @@ fn loadModule(bank: *ModuleBank, mod_name: []const u8) !void {
     var lib = try std.DynLib.open(path);
     errdefer lib.close();
 
+    std.log.info("opened '{s}'", .{mod_name});
+
     const abi_ptr = try findSymbol(*const u32, &lib, bank.alloc.*, "{s}_abi", mod_name);
     if (abi_ptr.* != engine_abi_version) return error.IncompatibleModule;
 
@@ -216,7 +259,7 @@ fn loadModule(bank: *ModuleBank, mod_name: []const u8) !void {
     const dein = try findSymbol(DeinitFn, &lib, bank.alloc.*, "{s}_deinit", mod_name);
     const upd = try findSymbolOpt(UpdateFn, &lib, bank.alloc.*, "{s}_update", mod_name) orelse noUpdate;
 
-    init(@constCast(bank.alloc));
+    init(@constCast(bank.alloc), &findPfn);
     errdefer dein();
 
     try bank.append(lib, dein, upd, mod_name); // ownership moves to bank
