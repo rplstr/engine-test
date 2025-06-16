@@ -97,5 +97,7 @@ pub fn poll(_: void, out: *WEvent) bool {
 pub fn closeWindow(_: void, handle: u64) void {
     if (handle == 0) return;
     log.info("closing window: {}", .{handle});
+
+    @setRuntimeSafety(false); // < Fixes the "incorrect alignment" panic.
     _ = windows.DestroyWindow(@ptrFromInt(handle));
 }
