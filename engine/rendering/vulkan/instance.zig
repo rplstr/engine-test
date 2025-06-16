@@ -11,13 +11,13 @@ pub const IDescription = struct {
 };
 
 /// Opaque handle bundle returned by `createInstance`.
-pub const IContext = struct {
+pub const IInstance = struct {
     instance: vulkan.Instance,
     base: vulkan.BaseWrapper,
     wrapper: vulkan.InstanceWrapper,
 
     /// Always call this when the instance is no longer required.
-    pub fn destroy(self: IContext) void {
+    pub fn destroy(self: IInstance) void {
         self.wrapper.destroyInstance(self.instance, null);
     }
 };
@@ -29,7 +29,7 @@ pub fn createInstance(
     description: IDescription,
     comptime extensions: []const [:0]const u8,
     comptime layers: []const [:0]const u8,
-) !IContext {
+) !IInstance {
     const vkb = vulkan.BaseWrapper.load(loader);
 
     const ext_names = toPtrArray(extensions);
@@ -60,7 +60,7 @@ pub fn createInstance(
 
     const vki = vulkan.InstanceWrapper.load(instance_handle, vkb.dispatch.vkGetInstanceProcAddr.?);
 
-    return IContext{
+    return IInstance{
         .instance = instance_handle,
         .base = vkb,
         .wrapper = vki,
@@ -75,7 +75,7 @@ pub fn createInstanceRuntime(
     ext_cnt: usize,
     layer_names: [*c]const [*:0]const u8,
     layer_cnt: usize,
-) !IContext {
+) !IInstance {
     const vkb = vulkan.BaseWrapper.load(loader);
 
     var app_info = vulkan.ApplicationInfo{
@@ -102,7 +102,7 @@ pub fn createInstanceRuntime(
     const handle = try vkb.createInstance(&ci, null);
     const vki = vulkan.InstanceWrapper.load(handle, vkb.dispatch.vkGetInstanceProcAddr.?);
 
-    return IContext{ .instance = handle, .base = vkb, .wrapper = vki };
+    return IInstance{ .instance = handle, .base = vkb, .wrapper = vki };
 }
 
 /// Convert a compile-time list of 0-terminated strings into the plain
