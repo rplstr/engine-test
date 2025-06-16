@@ -37,7 +37,7 @@ fn registerClass(instance: windows.HINSTANCE) void {
 }
 
 /// Do not invoke directly; use `w_open_window` instead.
-pub fn openWindow(description: WDescription) u64 {
+pub fn openWindow(_: void, description: WDescription) u64 {
     const inst = windows.GetModuleHandleA(null);
     registerClass(inst);
 
@@ -64,7 +64,7 @@ pub fn openWindow(description: WDescription) u64 {
 }
 
 /// Do not invoke directly; use `w_poll` instead.
-pub fn poll(out: *WEvent) bool {
+pub fn poll(_: void, out: *WEvent) bool {
     var msg: windows.MSG = undefined;
 
     if (windows.PeekMessageA(&msg, null, 0, 0, windows.PM_REMOVE) == 0) {
@@ -85,7 +85,7 @@ pub fn poll(out: *WEvent) bool {
 }
 
 /// Do not invoke directly; use `w_close_window` instead.
-pub fn closeWindow(handle: u64) void {
+pub fn closeWindow(_: void, handle: u64) void {
     if (handle == 0) return;
     _ = windows.DestroyWindow(@ptrFromInt(handle));
 }
