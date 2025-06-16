@@ -15,11 +15,10 @@ pub const IContext = struct {
     instance: vulkan.Instance,
     base: vulkan.BaseWrapper,
     wrapper: vulkan.InstanceWrapper,
-    proxy: vulkan.InstanceProxy,
 
     /// Always call this when the instance is no longer required.
     pub fn destroy(self: IContext) void {
-        self.proxy.destroyInstance(null);
+        self.wrapper.destroyInstance(self.instance, null);
     }
 };
 
@@ -60,13 +59,11 @@ pub fn createInstance(
     const instance_handle = try vkb.createInstance(&create_info, null);
 
     const vki = vulkan.InstanceWrapper.load(instance_handle, vkb.dispatch.vkGetInstanceProcAddr.?);
-    const proxy = vulkan.InstanceProxy.init(instance_handle, &vki);
 
     return IContext{
         .instance = instance_handle,
         .base = vkb,
         .wrapper = vki,
-        .proxy = proxy,
     };
 }
 
@@ -104,9 +101,8 @@ pub fn createInstanceRuntime(
 
     const handle = try vkb.createInstance(&ci, null);
     const vki = vulkan.InstanceWrapper.load(handle, vkb.dispatch.vkGetInstanceProcAddr.?);
-    const proxy = vulkan.InstanceProxy.init(handle, &vki);
 
-    return IContext{ .instance = handle, .base = vkb, .wrapper = vki, .proxy = proxy };
+    return IContext{ .instance = handle, .base = vkb, .wrapper = vki };
 }
 
 /// Convert a compile-time list of 0-terminated strings into the plain
