@@ -28,11 +28,9 @@ export fn engine_init(
 
     // VULKAN
     // INSTANCE
-    var vulkan_dl = std.DynLib.open("libvulkan.so") catch unreachable;
-    const vkGetInstanceProcAddr = vulkan_dl.lookup(vk.PfnGetInstanceProcAddr, "vkGetInstanceProcAddr").?;
     const desc = vulkan.IDescription{};
     const ctx_res = vulkan.instance.createInstance(
-        vkGetInstanceProcAddr,
+        vulkan.getInstanceProcAddr() catch unreachable,
         desc,
         &[_][:0]const u8{},
         &[_][:0]const u8{},
@@ -48,8 +46,8 @@ export fn engine_deinit() callconv(.c) void {
 
     // VULKAN
     // INSTANCE
-    if (vulkan_instance) |*ctx_| {
-        vulkan.rendering_vulkan_destroy_instance(ctx_);
+    if (vulkan_instance) |*ctx| {
+        vulkan.rendering_vulkan_destroy_instance(ctx);
         vulkan_instance = null;
     }
 }
