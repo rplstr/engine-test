@@ -25,7 +25,19 @@ pub fn build(b: *std.Build) void {
 
     // Install and run.
     b.installArtifact(exe);
-    const run_cmd = b.addRunArtifact(exe);
+
+    const bin_dir = b.getInstallPath(.bin, "");
+    const exe_install_path = b.getInstallPath(.bin, exe.out_filename);
+
+    var run_cmd = b.addSystemCommand(&.{exe_install_path});
+
+    if (target.result.os.tag == .windows) {
+        run_cmd.addPathDir(bin_dir);
+    }
+
     if (b.args) |args| run_cmd.addArgs(args);
+
+    run_cmd.step.dependOn(b.getInstallStep());
+
     b.step("run", "Run the application").dependOn(&run_cmd.step);
 }
