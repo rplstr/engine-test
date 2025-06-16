@@ -1,9 +1,12 @@
 //! X11 backend for the windowing sub-module.
+const std = @import("std");
 const proto = @import("proto");
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
     @cInclude("X11/Xutil.h");
 });
+
+const log = std.log.scoped(.x11);
 const WEvent = proto.WEvent;
 const WDescription = proto.WDescription;
 
@@ -13,7 +16,10 @@ var wm_delete: x11.Atom = 0;
 /// Do not invoke directly; use `w_open_window` instead.
 pub fn openWindow(_: void, description: WDescription) u64 {
     if (display == null) {
-        display = x11.XOpenDisplay(null) orelse return 0;
+        display = x11.XOpenDisplay(null) orelse {
+            log.err("XOpenDisplay failed", .{});
+            return 0;
+        };
     }
     const d = display.?;
     const screen = x11.XDefaultScreen(d);
@@ -41,6 +47,7 @@ pub fn openWindow(_: void, description: WDescription) u64 {
 
     _ = x11.XMapWindow(d, win);
     _ = x11.XFlush(d);
+    log.info("window created: {d}", .{win});
     return win;
 }
 
@@ -60,6 +67,7 @@ pub fn poll(_: void, out: *WEvent) bool {
         x11.ClientMessage => {
             if (@as(c_long, @intCast(wm_delete)) == xevent.xclient.data.l[0]) {
                 out.* = .{ .kind = .close, .code = 0 };
+                log.info("WM_DELETE_WINDOW received", .{});
                 got = true;
             }
         },
@@ -72,6 +80,7 @@ pub fn poll(_: void, out: *WEvent) bool {
 /// Do not invoke directly; use `w_close_window` instead.
 pub fn closeWindow(_: void, handle: u64) void {
     if (handle == 0 or display == null) return;
+    log.info("closing window: {}", .{handle});
     const d = display.?;
     _ = x11.XDestroyWindow(d, @intCast(handle));
     _ = x11.XFlush(d);

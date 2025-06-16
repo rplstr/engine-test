@@ -1,13 +1,17 @@
 //! Windows backend for the windowing sub-module.
 const builtin = @import("builtin");
+const std = @import("std");
+const proto = @import("proto");
 
 const windows = @cImport(@cInclude("windows.h"));
 
-const WDescription = @import("window.zig").WDescription;
-const WEvent = @import("window.zig").WEvent;
+const log = std.log.scoped(.win32);
 
-const wnd_class: [*:0]const u8 = "wnd";
-const def_title: [*:0]const u8 = "zig";
+const WDescription = proto.WDescription;
+const WEvent = proto.WEvent;
+
+const window_class: [*:0]const u8 = "wnd";
+const default_title: [*:0]const u8 = "zig";
 
 export fn wndProc(handle: windows.HWND, msg: windows.UINT, wparam: windows.WPARAM, lparam: windows.LPARAM) callconv(.c) windows.LRESULT {
     if (msg == windows.WM_DESTROY) {
@@ -19,7 +23,7 @@ export fn wndProc(handle: windows.HWND, msg: windows.UINT, wparam: windows.WPARA
 
 fn registerClass(instance: windows.HINSTANCE) void {
     var dummy: windows.WNDCLASSA = undefined;
-    if (windows.GetClassInfoA(instance, wnd_class, &dummy) != 0) return;
+    if (windows.GetClassInfoA(instance, window_class, &dummy) != 0) return;
 
     var wc: windows.WNDCLASSA = .{
         .style = 0,
@@ -31,7 +35,7 @@ fn registerClass(instance: windows.HINSTANCE) void {
         .hCursor = null,
         .hbrBackground = null,
         .lpszMenuName = null,
-        .lpszClassName = wnd_class,
+        .lpszClassName = window_class,
     };
     _ = windows.RegisterClassA(&wc);
 }
@@ -41,11 +45,11 @@ pub fn openWindow(_: void, description: WDescription) u64 {
     const inst = windows.GetModuleHandleA(null);
     registerClass(inst);
 
-    const title = if (description.title) |t| t else def_title;
+    const title = if (description.title) |t| t else default_title;
 
     const hwnd = windows.CreateWindowExA(
         0,
-        wnd_class,
+        window_class,
         @ptrCast(title),
         windows.WS_OVERLAPPEDWINDOW,
         windows.CW_USEDEFAULT,
@@ -57,9 +61,13 @@ pub fn openWindow(_: void, description: WDescription) u64 {
         inst,
         null,
     );
-    if (hwnd == null) return 0;
+    if (hwnd == null) {
+        log.err("CreateWindowExA failed", .{});
+        return 0;
+    }
 
     _ = windows.ShowWindow(hwnd, windows.SW_SHOW);
+    log.info("window created: {*}", .{hwnd});
     return @intFromPtr(hwnd);
 }
 
@@ -74,6 +82,7 @@ pub fn poll(_: void, out: *WEvent) bool {
     switch (msg.message) {
         windows.WM_CLOSE, windows.WM_QUIT => {
             out.* = .{ .kind = .close, .code = 0 };
+            log.info("WM_CLOSE/QUIT event", .{});
             return true;
         },
         else => {
@@ -87,5 +96,6 @@ pub fn poll(_: void, out: *WEvent) bool {
 /// Do not invoke directly; use `w_close_window` instead.
 pub fn closeWindow(_: void, handle: u64) void {
     if (handle == 0) return;
+    log.info("closing window: {}", .{handle});
     _ = windows.DestroyWindow(@ptrFromInt(handle));
 }
