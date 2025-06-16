@@ -2,8 +2,6 @@ const std = @import("std");
 
 const log = std.log.scoped(.wayland);
 
-//
-
 pub fn shmCreate(size: usize) !std.posix.fd_t {
     for (0..100) |_| {
         // 100 attempts

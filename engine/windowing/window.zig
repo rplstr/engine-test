@@ -2,8 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const proto = @import("proto");
 
-//
-
 const backends = switch (builtin.os.tag) {
     .windows => struct {
         const win32 = @import("win32.zig");

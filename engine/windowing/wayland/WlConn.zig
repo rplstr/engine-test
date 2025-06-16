@@ -6,8 +6,6 @@ const c = @cImport({
 
 const log = std.log.scoped(.wayland);
 
-//
-
 allocator: std.mem.Allocator,
 
 display: *c.struct_wl_display = undefined,

@@ -12,8 +12,6 @@ const WEvent = proto.WEvent;
 const WDescription = proto.WDescription;
 const WlConn = @import("../wayland.zig").WlConn;
 
-//
-
 conn: *WlConn,
 
 surface: *c.struct_wl_surface = undefined,
