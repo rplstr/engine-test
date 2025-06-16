@@ -7,7 +7,7 @@ pub const vulkan = @import("rendering/vulkan.zig");
 
 export const engine_abi: u32 = 1;
 
-var vulkan_instance: ?vulkan.IContext = null;
+var vulkan_instance: ?vulkan.IInstance = null;
 
 export fn engine_init(
     allocator: *std.mem.Allocator,
@@ -38,6 +38,14 @@ export fn engine_init(
         std.debug.print("failed to create instance {}\n", .{err});
         return;
     };
+
+    // PHYSICAL DEVICE
+    var selector = vulkan.physical_device.Selector{ .instance = ctx_res.instance, .wrapper = ctx_res.wrapper };
+    const pd = selector.choose(.{}) catch |err| {
+        std.debug.print("failed to choose physical device: {}\n", .{err});
+        return;
+    };
+    std.debug.print("using device {s}\n", .{pd.properties.device_name});
     vulkan_instance = ctx_res;
 }
 
