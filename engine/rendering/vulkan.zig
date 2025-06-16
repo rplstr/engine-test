@@ -11,6 +11,11 @@ pub const PDRequirements = physical_device.PDRequirements;
 pub const PDQueueInfo = physical_device.PDQueueInfo;
 pub const PDDevice = physical_device.PDDevice;
 
+pub const logical_device = @import("vulkan/logical_device.zig");
+pub const LDDescription = logical_device.LDDescription;
+pub const LDQueuePriorities = logical_device.LDQueuePriorities;
+pub const LDDevice = logical_device.LDDevice;
+
 /// Create a Vulkan instance.
 /// Returns 0 on success or a negative error code.
 ///
@@ -42,7 +47,7 @@ pub export fn rendering_vulkan_destroy_instance(ctx: *IInstance) callconv(.C) vo
 }
 
 /// Select a physical device that meets the given `requirements`.
-/// Returns 0 on success, otherwise a negative Zig error code.
+/// Returns 0 on success or a negative error code.
 ///
 /// C ABI. If calling from Zig, prefer `instance.Selector.choose`.
 pub export fn rendering_vulkan_choose_physical_device(
@@ -58,7 +63,41 @@ pub export fn rendering_vulkan_choose_physical_device(
     return 0;
 }
 
-/// Returns a pointer to `vkGetInstanceProcAddr` exported by the Vulkan loader.
+/// Create a Vulkan logical device.
+/// Returns 0 on success or a negative error code.
+///
+/// C ABI. If calling from Zig, prefer `logical_device.createLogicalDevice`.
+pub export fn rendering_vulkan_create_logical_device(
+    ctx: *const IInstance,
+    physical: *const PDDevice,
+    desc: *const LDDescription,
+    extensions: [*c]const [*:0]const u8,
+    extension_count: usize,
+    out_device: *LDDevice,
+) callconv(.C) c_int {
+    const dev = logical_device.createLogicalDeviceRuntime(
+        ctx.*,
+        physical.*,
+        desc.*,
+        extensions,
+        extension_count,
+    ) catch |err| {
+        return -@as(c_int, @intCast(@intFromError(err)));
+    };
+    out_device.* = dev;
+    return 0;
+}
+
+/// Destroy a logical device.
+///
+/// C ABI. If calling from Zig, prefer `logical_device.LDDevice.destroy`.
+pub export fn rendering_vulkan_destroy_logical_device(dev: *LDDevice) callconv(.C) void {
+    if (dev.handle == null) return;
+    dev.*.destroy();
+    dev.* = undefined;
+}
+
+/// Returns a pointer to `vkGetInstanceProcAddr` exported by the loader.
 pub fn getInstanceProcAddr() !vulkan.PfnGetInstanceProcAddr {
     try loader.init();
     const instanceProcAddr = try loader.get();
