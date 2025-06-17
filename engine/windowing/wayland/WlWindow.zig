@@ -22,7 +22,10 @@ width: u16,
 height: u16,
 
 pub fn init(conn: *WlConn, description: WDescription) !*@This() {
-    if (conn.closed) return error.Closed;
+    if (conn.closed) {
+        log.err("cannot create window: connection is closed", .{});
+        return error.Closed;
+    }
 
     const wl_window_state = try conn.allocator.create(@This());
     errdefer conn.allocator.destroy(wl_window_state);
@@ -33,6 +36,7 @@ pub fn init(conn: *WlConn, description: WDescription) !*@This() {
     };
 
     wl_window_state.surface = c.wl_compositor_create_surface(conn.compositor.?) orelse {
+        log.err("failed to create wl_surface", .{});
         return error.FailedToCreateWlSurface;
     };
     errdefer c.wl_surface_destroy(wl_window_state.surface);
@@ -41,11 +45,13 @@ pub fn init(conn: *WlConn, description: WDescription) !*@This() {
         conn.xdg_wm_base.?,
         wl_window_state.surface,
     ) orelse {
+        log.err("xdg_surface is unavailable", .{});
         return error.MissingXdgSurface;
     };
     errdefer c.xdg_surface_destroy(wl_window_state.xdg_surface);
 
     wl_window_state.xdg_toplevel = c.xdg_surface_get_toplevel(wl_window_state.xdg_surface) orelse {
+        log.err("unable to obtain xdg_toplevel for surface", .{});
         return error.MissingXdgToplevel;
     };
     errdefer c.xdg_toplevel_destroy(wl_window_state.xdg_toplevel);
@@ -59,6 +65,7 @@ pub fn init(conn: *WlConn, description: WDescription) !*@This() {
         &xdg_surface_listener,
         wl_window_state,
     )) {
+        log.err("failed to add xdg_surface listener", .{});
         return error.FailedToAddXdgSurfaceListener;
     }
 
@@ -120,6 +127,7 @@ pub fn createBuffer(self: *@This()) !*c.struct_wl_buffer {
         shm_fd,
         buffer_size,
     ) orelse {
+        log.err("failed to create wl_shm_pool", .{});
         return error.FailedToCreateWlShmPool;
     };
     errdefer c.wl_shm_pool_destroy(shm_pool);
@@ -132,6 +140,7 @@ pub fn createBuffer(self: *@This()) !*c.struct_wl_buffer {
         stride,
         c.WL_SHM_FORMAT_XRGB8888,
     ) orelse {
+        log.err("failed to create wl_buffer", .{});
         return error.FailedToCreateWlBuffer;
     };
     errdefer c.wl_buffer_destroy(buffer);

@@ -39,6 +39,7 @@ pub fn shmCreate(size: usize) !std.posix.fd_t {
         return fd;
     }
 
+    log.err("failed to create shared-memory segment after multiple attempts", .{});
     return error.FailedToCreateShm;
 }
 

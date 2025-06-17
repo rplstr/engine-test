@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const proto = @import("proto");
+const log = std.log.scoped(.runner);
 
 /// Engine/plug-in ABI version required by this build.
 pub const engine_abi_version = 1;
@@ -134,7 +135,10 @@ const ModuleBank = struct {
 
     /// Append a module to the bank.
     pub fn append(self: *ModuleBank, lib: std.DynLib, dein: DeinitFn, update: UpdateFn, name: []const u8) Error!void {
-        if (self.cnt == max_modules) return error.TooManyModules;
+        if (self.cnt == max_modules) {
+            log.err("module bank capacity of {d} reached", .{max_modules});
+            return error.TooManyModules;
+        }
 
         const off = @as(u32, @intCast(self.blob.items.len));
         try self.blob.appendSlice(name);
@@ -173,7 +177,7 @@ fn makeSharedName(allocator: std.mem.Allocator, mod_name: []const u8) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ prefix, mod_name, suffix });
 }
 
-/// Returns an absolute filesystem path to `mod_name`’s shared library.
+/// Returns an absolute filesystem path to `mod_name`'s shared library.
 fn makeLibraryPath(allocator: std.mem.Allocator, mod_name: []const u8) ![]u8 {
     const dir = try std.fs.selfExeDirPathAlloc(allocator);
     defer allocator.free(dir);
@@ -193,7 +197,11 @@ fn findSymbol(
 ) error{ MissingSymbol, OutOfMemory }!T {
     const sym = try std.fmt.allocPrintZ(allocator, f, .{mod_name});
     defer allocator.free(sym);
-    return lib.lookup(T, sym) orelse return error.MissingSymbol;
+    const ptr = lib.lookup(T, sym) orelse {
+        log.err("symbol '{s}' was not found in shared library", .{sym});
+        return error.MissingSymbol;
+    };
+    return ptr;
 }
 
 /// Same as `findSymbol`, but returns `null` if not found instead of an error.
@@ -253,7 +261,13 @@ fn loadModule(bank: *ModuleBank, mod_name: []const u8) !void {
     std.log.info("opened '{s}'", .{mod_name});
 
     const abi_ptr = try findSymbol(*const u32, &lib, bank.alloc.*, "{s}_abi", mod_name);
-    if (abi_ptr.* != engine_abi_version) return error.IncompatibleModule;
+    if (abi_ptr.* != engine_abi_version) {
+        log.err(
+            "module '{s}' ABI mismatch: found {d}, expected {d}",
+            .{ mod_name, abi_ptr.*, engine_abi_version },
+        );
+        return error.IncompatibleModule;
+    }
 
     const init = try findSymbol(InitFn, &lib, bank.alloc.*, "{s}_init", mod_name);
     const dein = try findSymbol(DeinitFn, &lib, bank.alloc.*, "{s}_deinit", mod_name);

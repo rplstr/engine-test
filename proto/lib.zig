@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.proto);
 
 // runner interface
 
@@ -10,7 +11,10 @@ pub var findPfn: PfnFindPfn = undefined;
 
 pub fn loadRunner(entry: PfnFindPfn) !void {
     findPfn = entry;
-    load("installPfn") orelse return error.FailedToLoadInstallPfn;
+    load("installPfn") orelse {
+        log.err("failed to load required symbol 'installPfn' from runner", .{});
+        return error.FailedToLoadInstallPfn;
+    };
 }
 
 pub fn installRunner() void {
@@ -53,9 +57,18 @@ pub var w_poll: PfnWPoll = undefined;
 pub var w_close_window: PfnWCloseWindow = undefined;
 
 pub fn loadEngine() !void {
-    load("w_open_window") orelse return error.FailedToLoadWOpenWindow;
-    load("w_poll") orelse return error.FailedToLoadWPoll;
-    load("w_close_window") orelse return error.FailedToLoadWCloseWindow;
+    load("w_open_window") orelse {
+        log.err("failed to load 'w_open_window' from engine", .{});
+        return error.FailedToLoadWOpenWindow;
+    };
+    load("w_poll") orelse {
+        log.err("failed to load 'w_poll' from engine", .{});
+        return error.FailedToLoadWPoll;
+    };
+    load("w_close_window") orelse {
+        log.err("failed to load 'w_close_window' from engine", .{});
+        return error.FailedToLoadWCloseWindow;
+    };
 }
 
 pub fn installEngine() void {

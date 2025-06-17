@@ -54,7 +54,10 @@ pub const Selector = struct {
                 best = ctx;
             }
         }
-        if (best_score < 0) return error.NoSuitableDevice;
+        if (best_score < 0) {
+            log.err("no suitable physical device found meeting requested capabilities", .{});
+            return error.NoSuitableDevice;
+        }
         return best;
     }
 };
@@ -62,7 +65,10 @@ pub const Selector = struct {
 fn enumerate(sel: Selector, out: *[max_devices]vulkan.PhysicalDevice) !usize {
     var cnt32: u32 = 0;
     _ = try sel.wrapper.enumeratePhysicalDevices(sel.instance, &cnt32, null);
-    if (cnt32 == 0) return error.NoPhysicalDevice;
+    if (cnt32 == 0) {
+        log.err("vkEnumeratePhysicalDevices returned zero devices", .{});
+        return error.NoPhysicalDevice;
+    }
     if (cnt32 > max_devices) cnt32 = max_devices;
     _ = try sel.wrapper.enumeratePhysicalDevices(sel.instance, &cnt32, out);
     log.debug("we have a total of {d} device(s)", .{cnt32});

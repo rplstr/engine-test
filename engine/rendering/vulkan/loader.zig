@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const vulkan = @import("vulkan");
+const log = std.log.scoped(.loader);
 
 var vulkan_library: ?std.DynLib = null;
 var instance_proc_addr: ?vulkan.PfnGetInstanceProcAddr = null;
@@ -39,12 +40,16 @@ pub fn init() !void {
         instance_proc_addr = sym;
         return;
     }
-    return err orelse error.VulkanLoaderUnavailable;
+    return err orelse blk: {
+        log.err("attempted {d} candidate libraries", .{names.len});
+        break :blk error.VulkanLoaderUnavailable;
+    };
 }
 
 /// Retrieve the handle.
 pub fn get() !InstanceProcAddr {
     if (instance_proc_addr) |proc_addr| return InstanceProcAddr{ .fn_ptr = proc_addr };
+    log.err("loader has not been initialized. call init() first", .{});
     return error.VulkanLoaderUnavailable;
 }
 

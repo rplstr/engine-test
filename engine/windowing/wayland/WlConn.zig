@@ -23,13 +23,13 @@ pub fn init(allocator: std.mem.Allocator) !*@This() {
     self.* = .{ .allocator = allocator };
 
     self.display = c.wl_display_connect(null) orelse {
-        log.debug("failed to connect", .{});
+        log.err("unable to establish Wayland display connection", .{});
         return error.FailedToConnect;
     };
     errdefer c.wl_display_disconnect(self.display);
 
     self.registry = c.wl_display_get_registry(self.display) orelse {
-        log.debug("failed to obtain wl_registry", .{});
+        log.err("wl_registry interface not available on display", .{});
         return error.MissingRegistry;
     };
     errdefer c.wl_registry_destroy(self.registry);
@@ -46,7 +46,7 @@ pub fn init(allocator: std.mem.Allocator) !*@This() {
         self.shm == null or
         self.xdg_wm_base == null)
     {
-        log.debug("failed to obtain one of: wl_compositor, wl_shm or xdg_wm_base", .{});
+        log.err("failed to obtain essential global interfaces (wl_compositor, wl_shm, xdg_wm_base)", .{});
         return error.MissingGlobals;
     }
 
