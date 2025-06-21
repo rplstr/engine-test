@@ -4,20 +4,33 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const engine_artifacts = @import("engine/build.zig").module(b, target, optimize);
-    _ = @import("game/build.zig").module(b, target, optimize, engine_artifacts);
+    const host = @import("host/build.zig").module(b);
 
-    const runner = b.addExecutable(.{
-        .name = "runner",
+    const engine = @import("engine/build.zig").module(b, target, optimize, host);
+    _ = @import("game/build.zig").module(
+        b,
+        target,
+        optimize,
+        engine.interface,
+        host,
+    );
+
+    const runner = b.createModule(.{
         .root_source_file = b.path("runner.zig"),
         .target = target,
         .optimize = optimize,
     });
-    runner.linkLibC();
+    runner.addImport("host", host);
 
-    b.installArtifact(runner);
+    const runner_exe = b.addExecutable(.{
+        .name = "runner",
+        .root_module = runner,
+    });
+    runner_exe.linkLibC();
 
-    const run_step = b.addRunArtifact(runner);
+    b.installArtifact(runner_exe);
+
+    const run_step = b.addRunArtifact(runner_exe);
 
     run_step.step.dependOn(b.getInstallStep());
 

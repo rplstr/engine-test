@@ -1,6 +1,6 @@
 {
     "modules": [
-        "engine",
-        "game"
+        "bin/engine.dll",
+        "bin/game.dll"
     ]
 }

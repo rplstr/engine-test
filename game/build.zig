@@ -1,11 +1,11 @@
 const std = @import("std");
-const Artifacts = @import("../engine/build.zig").Artifacts;
 
 pub fn module(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    engine: Artifacts,
+    engine_interface: *std.Build.Module,
+    host_module: *std.Build.Module,
 ) *std.Build.Step.Compile {
     const static = switch (target.result.os.tag) {
         .wasi, .freestanding => true,
@@ -17,7 +17,8 @@ pub fn module(
         .target = target,
         .optimize = optimize,
     });
-    root.addImport("engine", engine.interface);
+    root.addImport("engine", engine_interface);
+    root.addImport("host", host_module);
 
     const lib = b.addLibrary(.{
         .name = "game",
@@ -26,7 +27,6 @@ pub fn module(
         .version = .{ .major = 1, .minor = 0, .patch = 0 },
     });
     lib.linkLibC();
-    lib.linkLibrary(engine.lib);
 
     if (!static) {
         const inst = b.addInstallArtifact(lib, .{

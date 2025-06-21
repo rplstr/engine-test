@@ -14,6 +14,7 @@ pub fn module(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    host_module: *std.Build.Module,
 ) Artifacts {
     const static = switch (target.result.os.tag) {
         .wasi, .freestanding => true,
@@ -32,6 +33,7 @@ pub fn module(
         .target = target,
         .optimize = optimize,
     });
+    root.addImport("host", host_module);
     root.addImport("interface", interface_mod);
     root.addImport("windowing/interface.zig", windowing_artifacts.interface);
 
@@ -63,17 +65,20 @@ fn buildWindowing(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) WindowingArtifacts {
-    const interface_mod = b.addModule("interface", .{
+    const interface = b.addModule("interface", .{
         .root_source_file = b.path("engine/windowing/interface.zig"),
     });
 
-    const lib = b.addStaticLibrary(.{
-        .name = "windowing",
+    const mod = b.addModule("windowing", .{
         .root_source_file = b.path("engine/windowing/window.zig"),
         .target = target,
         .optimize = optimize,
     });
-    lib.root_module.addImport("interface", interface_mod);
+    mod.addImport("interface", interface);
+    const lib = b.addLibrary(.{
+        .name = "windowing",
+        .root_module = mod,
+    });
     lib.linkLibC();
 
     switch (target.result.os.tag) {
@@ -109,7 +114,7 @@ fn buildWindowing(
 
     return .{
         .lib = lib,
-        .interface = interface_mod,
+        .interface = interface,
     };
 }
 
