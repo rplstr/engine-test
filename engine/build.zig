@@ -15,6 +15,11 @@ pub fn module(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) Artifacts {
+    const static = switch (target.result.os.tag) {
+        .wasi, .freestanding => true,
+        else => false,
+    };
+
     const windowing_artifacts = buildWindowing(b, target, optimize);
 
     const interface_mod = b.addModule("engine-interface", .{
@@ -33,12 +38,19 @@ pub fn module(
     const lib = b.addLibrary(.{
         .name = "engine",
         .root_module = root,
-        .linkage = .dynamic,
+        .linkage = if (static) .static else .dynamic,
         .version = .{ .major = 1, .minor = 0, .patch = 0 },
     });
     lib.linkLibC();
     lib.linkLibrary(windowing_artifacts.lib);
-    b.installArtifact(lib);
+
+    if (!static) {
+        const inst = b.addInstallArtifact(lib, .{
+            .dest_dir = .{ .override = .bin },
+            .dest_sub_path = b.fmt("bin/{s}", .{lib.out_filename}),
+        });
+        b.getInstallStep().dependOn(&inst.step);
+    }
 
     return .{
         .lib = lib,

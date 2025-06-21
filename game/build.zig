@@ -27,7 +27,14 @@ pub fn module(
     });
     lib.linkLibC();
     lib.linkLibrary(engine.lib);
-    b.installArtifact(lib);
+
+    if (!static) {
+        const inst = b.addInstallArtifact(lib, .{
+            .dest_dir = .{ .override = .bin },
+            .dest_sub_path = b.fmt("bin/{s}", .{lib.out_filename}),
+        });
+        b.getInstallStep().dependOn(&inst.step);
+    }
 
     return lib;
 }
