@@ -1,20 +1,21 @@
-//! X11 backend for the windowing sub-module.
 const std = @import("std");
-const proto = @import("proto");
 const x11 = @cImport({
     @cInclude("X11/Xlib.h");
     @cInclude("X11/Xutil.h");
 });
 
 const log = std.log.scoped(.x11);
-const WEvent = proto.WEvent;
-const WDescription = proto.WDescription;
+
+const interface = @import("interface.zig");
+
+const Event = interface.Event;
+const Description = interface.Description;
 
 var display: ?*x11.Display = null;
 var wm_delete: x11.Atom = 0;
 
 /// Do not invoke directly; use `w_open_window` instead.
-pub fn openWindow(_: void, description: WDescription) u64 {
+pub fn openWindow(_: void, description: Description) u64 {
     if (display == null) {
         display = x11.XOpenDisplay(null) orelse {
             log.err("XOpenDisplay failed", .{});
@@ -52,7 +53,7 @@ pub fn openWindow(_: void, description: WDescription) u64 {
 }
 
 /// Do not invoke directly; use `w_poll` instead.
-pub fn poll(_: void, out: *WEvent) bool {
+pub fn poll(_: void, out: *Event) bool {
     const d = display orelse return false;
 
     if (x11.XPending(d) == 0) {

@@ -8,13 +8,17 @@ const c = @cImport({
 const x11 = @import("x11.zig");
 
 const log = std.log.scoped(.wayland);
-const WEvent = proto.WEvent;
-const WDescription = proto.WDescription;
+
+const interface = @import("interface.zig");
+
+const Event = interface.Event;
+const Description = interface.Description;
+
 pub const WlConn = @import("wayland/WlConn.zig");
 pub const WlWindow = @import("wayland/WlWindow.zig");
 
 /// Do not invoke directly; use `w_open_window` instead.
-pub fn openWindow(wl_conn: *WlConn, description: WDescription) u64 {
+pub fn openWindow(wl_conn: *WlConn, description: Description) u64 {
     const window = WlWindow.init(wl_conn, description) catch |err| {
         log.err("failed to create wayland window: {}", .{err});
         return 0;
@@ -24,7 +28,7 @@ pub fn openWindow(wl_conn: *WlConn, description: WDescription) u64 {
 }
 
 /// Do not invoke directly; use `w_poll` instead.
-pub fn poll(wl_conn: *WlConn, out: *WEvent) bool {
+pub fn poll(wl_conn: *WlConn, out: *Event) bool {
     _ = out;
 
     while (c.wl_display_dispatch(wl_conn.display) != -1) {}

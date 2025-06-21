@@ -3,20 +3,14 @@ const builtin = @import("builtin");
 const proto = @import("proto");
 const log = std.log.scoped(.runner);
 
-/// Engine/plug-in ABI version required by this build.
 pub const engine_abi_version = 1;
 
-/// Maximum number of concurrently loaded modules.
 pub const max_modules = 128;
 
-/// Pointer to module initializer exported as `<name>_init`.
-pub const InitFn = *const fn (*std.mem.Allocator, *const anyopaque) callconv(.c) void;
+pub const InitFn = *const fn (*std.mem.Allocator) callconv(.c) void;
 
-/// Pointer to module de-initializer exported as `<name>_deinit`.
 pub const DeinitFn = *const fn () callconv(.c) void;
 
-/// Pointer to a frame-update routine exported as `<name>_update`.
-/// Optional. Return `false` to request exit.
 pub const UpdateFn = *const fn (f64) callconv(.c) bool;
 fn noUpdate(_: f64) callconv(.c) bool {
     return true;
@@ -25,10 +19,6 @@ fn noUpdate(_: f64) callconv(.c) bool {
 pub fn main() !void {
     if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding)
         @compileError("Dynamic modules are not supported on this target.");
-
-    proto.findPfn = findPfn;
-    proto.installPfn = installPfn;
-    proto.installRunner();
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -41,12 +31,6 @@ pub fn main() !void {
     var last = std.time.nanoTimestamp();
     var dt: f64 = 0;
 
-    std.log.debug("installed pfns:", .{});
-    var it = pfns.iterator();
-    while (it.next()) |ent| {
-        std.log.debug(" - pfn: {s}", .{ent.key_ptr.*});
-    }
-
     while (bank.updateAll(dt)) {
         const now = std.time.nanoTimestamp();
         dt = @as(f64, @floatFromInt(now - last)) / 1e9;
@@ -54,56 +38,23 @@ pub fn main() !void {
     }
 }
 
-var pfns: std.StringArrayHashMap(*const anyopaque) = .init(std.heap.c_allocator);
-
-fn installPfn(_func: [*c]const u8, pfn: *const anyopaque) callconv(.c) bool {
-    // duplicate the key data, because `pfns` can outlive the borrowed `mod`
-    const func: []const u8 = std.heap.c_allocator.dupe(u8, std.mem.span(_func)) catch |err| {
-        std.log.err("failed to install pfn={s}: {}", .{ std.mem.span(_func), err });
-        return false;
-    };
-
-    const result = pfns.getOrPut(func) catch |err| {
-        std.log.err("failed to install pfn={s}: {}", .{ func, err });
-        std.heap.c_allocator.free(func);
-        return false;
-    };
-
-    if (result.found_existing) {
-        std.log.err("duplicate pfn={s}", .{func});
-        std.heap.c_allocator.free(func);
-        return false;
-    }
-
-    result.value_ptr.* = pfn;
-    return true;
-}
-
-fn findPfn(_func: [*c]const u8) callconv(.c) ?*const anyopaque {
-    const func: []const u8 = std.mem.span(_func);
-    return pfns.get(func);
-}
-
-/// Contiguous store that tracks every live module.
 const ModuleBank = struct {
-    /// Allocator handed to modules.
     alloc: *const std.mem.Allocator,
-    /// Handles returned by `std.DynLib.open`.
+
     libs: [max_modules]std.DynLib = undefined,
-    /// Corresponding `*_deinit` pointers.
+
     dein: [max_modules]DeinitFn = undefined,
-    /// Optional `*_update` pointers.
+
     update: [max_modules]UpdateFn = undefined,
-    /// Offset of zero-terminated name inside `blob`.
+
     offs: [max_modules]u32 = undefined,
-    /// Active slot count.
+
     cnt: u32 = 0,
-    /// Packed, null-delimited name storage.
+
     blob: std.ArrayList(u8),
 
     pub const Error = error{ TooManyModules, OutOfMemory };
 
-    /// Create an empty bank that allocates from `allocator`.
     pub fn init(allocator: *const std.mem.Allocator) !ModuleBank {
         return .{
             .alloc = allocator,
@@ -111,7 +62,6 @@ const ModuleBank = struct {
         };
     }
 
-    /// Call each `*_deinit` and close all libraries in reverse order.
     pub fn deinit(self: *ModuleBank) !void {
         while (self.cnt > 0) {
             self.cnt -= 1;
@@ -121,7 +71,6 @@ const ModuleBank = struct {
         self.blob.deinit();
     }
 
-    /// `true` if `name` already exists in the bank.
     pub fn contains(self: *ModuleBank, name: []const u8) bool {
         for (0..@as(usize, self.cnt)) |i|
             if (std.mem.eql(u8, self.getName(i), name)) return true;
@@ -133,7 +82,6 @@ const ModuleBank = struct {
         return true;
     }
 
-    /// Append a module to the bank.
     pub fn append(self: *ModuleBank, lib: std.DynLib, dein: DeinitFn, update: UpdateFn, name: []const u8) Error!void {
         if (self.cnt == max_modules) {
             log.err("module bank capacity of {d} reached", .{max_modules});
@@ -152,7 +100,6 @@ const ModuleBank = struct {
         self.cnt += 1;
     }
 
-    /// Retrieve the null-terminated name stored at `idx`.
     pub fn getName(self: *ModuleBank, idx: usize) []const u8 {
         const base = self.offs[idx];
         const bytes = self.blob.items[base..];
@@ -161,12 +108,6 @@ const ModuleBank = struct {
     }
 };
 
-/// Returns a platform-specific shared library filename.
-/// ```
-/// "engine" => "libengine.so" (Linux)
-/// "engine" => "engine.dll"   (Windows)
-/// "engine" => "engine.dylib" (macOS)
-/// ```
 fn makeSharedName(allocator: std.mem.Allocator, mod_name: []const u8) ![]u8 {
     const suffix = switch (builtin.os.tag) {
         .windows => ".dll",
@@ -177,17 +118,15 @@ fn makeSharedName(allocator: std.mem.Allocator, mod_name: []const u8) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ prefix, mod_name, suffix });
 }
 
-/// Returns an absolute filesystem path to `mod_name`'s shared library.
 fn makeLibraryPath(allocator: std.mem.Allocator, mod_name: []const u8) ![]u8 {
     const dir = try std.fs.selfExeDirPathAlloc(allocator);
     defer allocator.free(dir);
     const file = try makeSharedName(allocator, mod_name);
     defer allocator.free(file);
-    // We have all the dlls in bin.
+
     return std.fs.path.join(allocator, &.{ dir, "bin", file });
 }
 
-/// Return a pointer to `T` exported from `lib` under `fmt.format(mod_name)`.
 fn findSymbol(
     comptime T: type,
     lib: *std.DynLib,
@@ -204,7 +143,6 @@ fn findSymbol(
     return ptr;
 }
 
-/// Same as `findSymbol`, but returns `null` if not found instead of an error.
 fn findSymbolOpt(
     comptime T: type,
     lib: *std.DynLib,
@@ -217,8 +155,6 @@ fn findSymbolOpt(
     return lib.lookup(T, sym);
 }
 
-/// Load `"modules"` array from a JSON manifest and invoke `loadModule`
-/// for each entry.  Duplicate names are ignored.
 fn loadManifest(allocator: std.mem.Allocator, path: []const u8, bank: *ModuleBank) !void {
     var file = std.fs.cwd().openFile(path, .{}) catch |e|
         switch (e) {
@@ -241,14 +177,12 @@ fn loadManifest(allocator: std.mem.Allocator, path: []const u8, bank: *ModuleBan
     }
 }
 
-/// `false` if name contains directory separators or `".."`.
 fn isValidName(name: []const u8) bool {
     return !(std.mem.containsAtLeast(u8, name, 1, "/") or
         std.mem.containsAtLeast(u8, name, 1, "\\") or
         std.mem.eql(u8, name, ".."));
 }
 
-/// Dynamically load, version-check, call `<mod>_init`, then persist in `bank`.
 fn loadModule(bank: *ModuleBank, mod_name: []const u8) !void {
     const path = try makeLibraryPath(bank.alloc.*, mod_name);
     defer bank.alloc.free(path);
@@ -260,21 +194,12 @@ fn loadModule(bank: *ModuleBank, mod_name: []const u8) !void {
 
     std.log.info("opened '{s}'", .{mod_name});
 
-    const abi_ptr = try findSymbol(*const u32, &lib, bank.alloc.*, "{s}_abi", mod_name);
-    if (abi_ptr.* != engine_abi_version) {
-        log.err(
-            "module '{s}' ABI mismatch: found {d}, expected {d}",
-            .{ mod_name, abi_ptr.*, engine_abi_version },
-        );
-        return error.IncompatibleModule;
-    }
-
     const init = try findSymbol(InitFn, &lib, bank.alloc.*, "{s}_init", mod_name);
     const dein = try findSymbol(DeinitFn, &lib, bank.alloc.*, "{s}_deinit", mod_name);
     const upd = try findSymbolOpt(UpdateFn, &lib, bank.alloc.*, "{s}_update", mod_name) orelse noUpdate;
 
-    init(@constCast(bank.alloc), &findPfn);
+    init(@constCast(bank.alloc));
     errdefer dein();
 
-    try bank.append(lib, dein, upd, mod_name); // ownership moves to bank
+    try bank.append(lib, dein, upd, mod_name);
 }

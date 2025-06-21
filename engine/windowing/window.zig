@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const proto = @import("proto");
+const interface = @import("interface.zig");
 
 const backends = switch (builtin.os.tag) {
     .windows => struct {
@@ -26,9 +26,21 @@ const Backend = switch (builtin.os.tag) {
 
 var backend: Backend = .{ .uninitialized = {} };
 
-pub fn init(allocator: std.mem.Allocator) void {
-    // std.debug.dumpCurrentStackTrace(null);
-    // defer _ = @atomicLoad(u8, @as(*u8, @ptrCast(&backend)), .seq_cst);
+fn backendCall(comptime T: type, comptime function_name: []const u8, args: anytype) T {
+    switch (std.meta.activeTag(backend)) {
+        inline else => |tag| {
+            if (tag == .uninitialized) unreachable;
+
+            const active_backend = @field(backends, @tagName(tag));
+            const state = @field(backend, @tagName(tag));
+            const func = @field(active_backend, function_name);
+
+            return @call(.auto, func, .{state} ++ args);
+        },
+    }
+}
+
+fn init(allocator: *std.mem.Allocator) callconv(.c) void {
     defer std.log.debug("picked windowing backend: {s}", .{
         @tagName(backend),
     });
@@ -50,40 +62,21 @@ pub fn init(allocator: std.mem.Allocator) void {
     }
 }
 
-pub fn backendCall(comptime T: type, comptime function_name: []const u8, args: anytype) T {
-    // std.debug.dumpCurrentStackTrace(null);
-    // _ = @atomicLoad(u8, @as(*u8, @ptrCast(&backend)), .seq_cst);
-    switch (std.meta.activeTag(backend)) {
-        inline else => |tag| {
-            // std.log.debug("windowing backend: {s}", .{@tagName(tag)});
-
-            if (tag == .uninitialized) unreachable;
-
-            const active_backend = @field(backends, @tagName(tag));
-            const state = @field(backend, @tagName(tag));
-            const func = @field(active_backend, function_name);
-
-            // std.log.debug("calling {any} with {any}", .{
-            //     &func,
-            //     .{state} ++ args,
-            // });
-
-            return @call(.auto, func, .{state} ++ args);
-        },
-    }
-}
-
-/// Creates and shows a native window.
-pub export fn w_open_window(description: *const proto.WDescription) callconv(.c) u64 {
+fn open_window(description: *const interface.Description) callconv(.c) u64 {
     return backendCall(u64, "openWindow", .{description.*});
 }
 
-/// Non-blocking. Returns `true` if an event for `handle` was placed in `out`.
-pub export fn w_poll(out: *proto.WEvent) callconv(.c) bool {
+fn poll(out: *interface.Event) callconv(.c) bool {
     return backendCall(bool, "poll", .{out});
 }
 
-/// Destroys a window previously created by `w_open_window`.
-pub export fn w_close_window(handle: u64) callconv(.c) void {
+fn close_window(handle: u64) callconv(.c) void {
     return backendCall(void, "closeWindow", .{handle});
 }
+
+pub export const windowing_vtable: interface.VTable = .{
+    .init = init,
+    .open_window = open_window,
+    .poll = poll,
+    .close_window = close_window,
+};

@@ -1,14 +1,14 @@
-//! Windows backend for the windowing sub-module.
 const builtin = @import("builtin");
 const std = @import("std");
-const proto = @import("proto");
 
 const windows = @cImport(@cInclude("windows.h"));
 
 const log = std.log.scoped(.win32);
 
-const WDescription = proto.WDescription;
-const WEvent = proto.WEvent;
+const interface = @import("interface.zig");
+
+const Description = interface.Description;
+const Event = interface.Event;
 
 const window_class: [*:0]const u8 = "wnd";
 const default_title: [*:0]const u8 = "zig";
@@ -41,7 +41,7 @@ fn registerClass(instance: windows.HINSTANCE) void {
 }
 
 /// Do not invoke directly; use `w_open_window` instead.
-pub fn openWindow(_: void, description: WDescription) u64 {
+pub fn openWindow(_: void, description: Description) u64 {
     const inst = windows.GetModuleHandleA(null);
     registerClass(inst);
 
@@ -72,7 +72,7 @@ pub fn openWindow(_: void, description: WDescription) u64 {
 }
 
 /// Do not invoke directly; use `w_poll` instead.
-pub fn poll(_: void, out: *WEvent) bool {
+pub fn poll(_: void, out: *Event) bool {
     var msg: windows.MSG = undefined;
 
     if (windows.PeekMessageA(&msg, null, 0, 0, windows.PM_REMOVE) == 0) {

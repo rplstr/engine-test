@@ -1,43 +1,30 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
-    // static module
-    const proto = @import("proto/build.zig").module(b, target, optimize);
+    const engine_artifacts = @import("engine/build.zig").module(b, target, optimize);
+    _ = @import("game/build.zig").module(b, target, optimize, engine_artifacts);
 
-    // Modules.
-    _ = @import("engine/build.zig").module(b, target, optimize, proto);
-    _ = @import("game/build.zig").module(b, target, optimize, proto);
-
-    // Runner.
-    const exe = b.addExecutable(.{
+    const runner = b.addExecutable(.{
         .name = "runner",
-        .root_source_file = b.path("source/runner.zig"),
-        .optimize = optimize,
+        .root_source_file = b.path("runner.zig"),
         .target = target,
+        .optimize = optimize,
     });
-    exe.root_module.addImport("proto", proto);
-    exe.linkLibC();
-    exe.addRPath(.{ .cwd_relative = "$ORIGIN" });
-    exe.addRPath(.{ .cwd_relative = "$ORIGIN/zig-out/bin/" });
+    runner.linkLibC();
 
-    // Install and run.
-    b.installArtifact(exe);
+    b.installArtifact(runner);
 
-    const bin_dir = b.getInstallPath(.bin, "");
-    const exe_install_path = b.getInstallPath(.bin, exe.out_filename);
+    const run_step = b.addRunArtifact(runner);
 
-    var run_cmd = b.addSystemCommand(&.{exe_install_path});
+    run_step.step.dependOn(b.getInstallStep());
 
-    if (target.result.os.tag == .windows) {
-        run_cmd.addPathDir(bin_dir);
+    if (b.args) |args| {
+        run_step.addArgs(args);
     }
 
-    if (b.args) |args| run_cmd.addArgs(args);
-
-    run_cmd.step.dependOn(b.getInstallStep());
-
-    b.step("run", "Run the application").dependOn(&run_cmd.step);
+    const run_option = b.step("run", "Run the app");
+    run_option.dependOn(&run_step.step);
 }
