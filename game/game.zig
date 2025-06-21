@@ -4,7 +4,7 @@ const host = @import("host");
 
 var vtable: *const engine.VTable = undefined;
 
-pub export fn module_init(h: *const host.HostInterface) void {
+pub export fn attach(h: *const host.HostInterface) void {
     const engine_ptr = h.query_interface(h.context, engine.iid_engine_v1) orelse {
         std.log.err("failed to get engine interface", .{});
         return;

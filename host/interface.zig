@@ -8,5 +8,5 @@ pub const HostInterface = extern struct {
     query_interface: *const fn (ctx: *anyopaque, iid: InterfaceID) callconv(.c) ?*const anyopaque,
 };
 
-pub const module_init_fn_name = "module_init";
+pub const module_init_fn_name = "attach";
 pub const ModuleInitFn = fn (*const HostInterface) callconv(.c) void;
